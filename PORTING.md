@@ -231,8 +231,13 @@ viết bridge client dùng chung iOS + Firefox trong affree theo hợp đồng t
     `content.js` 0.1.35 gửi message này khi click cùng frame không ăn);
     + handler `zapee_patch_order_payload` (user đổi login↔register giữa luồng —
     vá `accountMode` vào handoff đang lưu trong `storage.session`).
-  - `session-engine.js`: port thay đổi panel `sidepanel/index.ts` +66 /
-    `sidepanel.html` +3 (chi tiết marker trong `PANEL_MARKERS`).
+  - `session-engine.js`: shim thêm route `zapee_patch_order_payload` — vá
+    `accountMode` vào payload IN-MEMORY của engine (retry 4001 gửi lại
+    run_order bằng payload hiện tại) RỒI vẫn forward xuống background; port
+    thay đổi panel `sidepanel/index.ts` +66 / `sidepanel.html` +3: nhãn chuỗi
+    aff-bhx/aff-alibaba/aff-shopee, tên thẻ cửa hàng bỏ nhãn "Mua online"
+    (`storeCardTitle` + dòng phụ `.store-branch`), phần người nhận thêm Email +
+    Mã ZIP (chi tiết marker trong `PANEL_MARKERS`).
   - **Hunk upstream SKIP có chủ đích** (ghi để lần sync sau khỏi tìm lại):
     `migrateSessionExecutorToTab` (di trú executor sang child-tab qua
     `openerTabId` — mô hình mobile: engine sống trong chính trang, tab mới tự

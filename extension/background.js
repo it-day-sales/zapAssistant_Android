@@ -880,6 +880,58 @@ if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
         });
         return true;
       }
+      // Content.js 0.1.35 (sync 2a4f94d): click node đã đánh dấu
+      // data-zapee-page-click trong page JS world, xuyên frame — dùng khi
+      // dispatch PAGE_ACTIVATE_EVENT cùng frame không ăn. Firefox hỗ trợ
+      // scripting.executeScript world MAIN từ 128 (manifest đã khoá 128+).
+      case "zapee_page_click": {
+        const token = String(message.token || "");
+        if (typeof tabId !== "number" || !/^[a-zA-Z0-9_-]{4,32}$/.test(token)) {
+          sendResponse({ ok: false });
+          return void 0;
+        }
+        const frameIds = typeof sender.frameId === "number" ? [sender.frameId] : void 0;
+        chrome.scripting.executeScript({
+          target: frameIds ? { tabId, frameIds } : { tabId, allFrames: true },
+          world: "MAIN",
+          args: [token, "data-zapee-page-click"],
+          func: (clickToken, attr) => {
+            const el = document.querySelector(`[${attr}="${clickToken}"]`);
+            if (!(el instanceof HTMLElement)) return false;
+            try {
+              el.focus({ preventScroll: true });
+            } catch {
+              // Focus chỉ best-effort; click mới là hợp đồng.
+            }
+            el.click();
+            return true;
+          }
+        }).then((injection) => {
+          sendResponse({ ok: Boolean(injection?.some((item) => item.result === true)) });
+        }).catch(() => {
+          sendResponse({ ok: false });
+        });
+        return true;
+      }
+      // Content.js 0.1.35 (sync 2a4f94d): user đổi login↔register giữa luồng.
+      // Bản mobile không giữ sessions Map trong background (WS sống trong
+      // session-engine) nên vá thẳng activeOrderHandoff trong storage.session —
+      // engine nhận payload mới ở lần boot/resume kế tiếp.
+      case "zapee_patch_order_payload": {
+        const patchSessionId = String(message.sessionId || "");
+        const accountMode = message.accountMode === "register" || message.accountMode === "login" ? message.accountMode : "";
+        if (!patchSessionId || !accountMode) return void 0;
+        void (async () => {
+          const active = await getActiveHandoff();
+          if (!active || active.sessionId !== patchSessionId) return;
+          if (typeof active.tabId === "number" && typeof tabId === "number" && active.tabId !== tabId) return;
+          const payload = { ...active.payload && typeof active.payload === "object" ? active.payload : {}, accountMode };
+          await saveActiveHandoff({ ...active, payload }, active.tabId);
+          void diagLog("bg", `patch_order_payload accountMode=${accountMode}`, { sessionId: patchSessionId });
+        })().catch(() => {
+        });
+        return void 0;
+      }
 
       // ------------------------------------------- từ session-engine.js (B4)
       case "zapee_engine_boot": {

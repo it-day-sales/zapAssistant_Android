@@ -164,6 +164,11 @@
       case "zapee_coop_account_ready":
         void engineOnCoopAccountReady(message).then((response) => invokeCallback(callback, response));
         return;
+      case "zapee_patch_order_payload":
+        // Vá in-memory cho retry 4001 RỒI vẫn chuyển xuống background (bản lưu).
+        engineOnPatchOrderPayload(message);
+        forwardToBackground(message, callback);
+        return;
       case "zapee_open_sidebar":
         void engineOnOpenPanel();
         invokeCallback(callback, void 0);
@@ -891,6 +896,16 @@
     void sendDomOpResultToServer(session, message);
   }
 
+  // Content.js 0.1.35 (sync 2a4f94d): vá accountMode vào payload IN-MEMORY của
+  // engine — retry 4001 gửi lại run_order bằng entry.payload hiện tại, thiếu
+  // patch này thì reconnect quay về chế độ login/register cũ. Message vẫn được
+  // forward xuống background để vá bản lưu trong storage.session.
+  function engineOnPatchOrderPayload(message) {
+    const accountMode = message && (message.accountMode === "register" || message.accountMode === "login") ? message.accountMode : "";
+    if (!accountMode || !session || session.sessionId !== String(message.sessionId || "")) return;
+    session.payload = { ...session.payload && typeof session.payload === "object" ? session.payload : {}, accountMode };
+  }
+
   async function engineOnUrlChanged(message) {
     const url = String(message.url || "");
     const entry = session;
@@ -1177,7 +1192,7 @@ button { font: inherit; color: inherit; }
 .store-logo-text { position: absolute; left: 50%; transform: translateX(-50%); text-transform: capitalize; font-size: 11px; font-weight: 700; color: #000; white-space: nowrap; }
 .store-name-row > div { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
 .store-name-row strong { font-size: 15px; }
-.store-name-row span:last-child { overflow: hidden; color: #53645e; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.store-name-row span:last-child, .store-name-row .store-branch { overflow: hidden; color: #53645e; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .store-name-row .store-detail-state.ordering { color: #c97800; font-weight: 700; }
 .store-name-row .store-detail-state.done { color: #13865e; font-weight: 700; }
 .order-items { margin-top: 10px; }
@@ -1360,15 +1375,46 @@ button { font: inherit; color: inherit; }
   function chainLabel(chain) {
     const c = String(chain || "").toLowerCase();
     if (c === "coop" || c === "cop" || c === "coopmart") return "Co.opmart";
-    if (c === "bhx" || c === "bachhoaxanh") return "Bách Hóa Xanh";
+    if (c === "bhx" || c === "bachhoaxanh" || c === "aff-bhx") return "Bách Hóa Xanh";
+    if (c === "alibaba" || c === "aff-alibaba") return "Alibaba.com";
+    if (c === "shopee" || c === "spe" || c === "aff-shopee") return "Shopee";
     return chain ? chain.toUpperCase() : "Nhà bán";
   }
 
   function chainInitial(chain) {
     const c = String(chain || "").toLowerCase();
     if (c === "coop" || c === "cop") return "C";
-    if (c === "bhx") return "B";
+    if (c === "bhx" || c === "aff-bhx") return "B";
+    if (c === "alibaba" || c === "aff-alibaba") return "A";
+    if (c === "shopee" || c === "spe" || c === "aff-shopee") return "S";
     return (chain || "?").slice(0, 1).toUpperCase();
+  }
+
+  // Port từ sidepanel.js Chrome 0.1.35 (sync 2a4f94d): tên thẻ cửa hàng bỏ nhãn
+  // "Mua online" chung chung, ưu tiên tên thật → chi nhánh → nhãn chuỗi; kèm
+  // các helper đọc mã ZIP từ payload cho phần thông tin người nhận.
+  function isGenericOnlineLabel(value) {
+    return /^mua online$/i.test(String(value || "").trim());
+  }
+
+  function storeCardTitle(storeName, branch, chain) {
+    if (storeName && !isGenericOnlineLabel(storeName)) return storeName;
+    if (branch && !isGenericOnlineLabel(branch)) return branch;
+    return chainLabel(chain);
+  }
+
+  function postalCodeFromAddress(value) {
+    return String(value || "").split(",").map((part) => part.trim()).find((part) => /^\d{4,6}$/.test(part)) || "";
+  }
+
+  function recordOf(value) {
+    return value !== null && typeof value === "object" && !Array.isArray(value) ? value : null;
+  }
+
+  function postalCodeFromRecord(value) {
+    const record = recordOf(value);
+    if (!record) return "";
+    return String(record.postalCode || record.zip || record.zipCode || record.postcode || "").trim();
   }
 
   // Port từ sidepanel.js Chrome (sync 18/08, STV3-9995 "Set up logo zapee"):
@@ -1658,7 +1704,7 @@ button { font: inherit; color: inherit; }
     const items = preferredStore.products;
     const total = preferredStore.total;
     const storeName = preferredStore.name;
-    const branch = preferredStore.branch || preferredStore.name;
+    const branch = chain === "aff-shopee" ? preferredStore.name : preferredStore.branch || preferredStore.name;
     const selectedIsCurrent = preferredStore.key === currentStoreKey;
     const entryUrl = selectedIsCurrent ? preferredStore.entryUrl || opts.entryUrl : void 0;
     const selectedCompleted = Boolean(
@@ -1670,6 +1716,10 @@ button { font: inherit; color: inherit; }
     const buyerName = String(payload.shippingAddress?.name || payload.buyerName || payload.name || "—");
     const buyerPhone = String(payload.shippingAddress?.phone || payload.buyerPhone || payload.phone || "—");
     const buyerAddress = String(payload.shippingAddress?.fullAddress || payload.shippingAddress?.addressLine || payload.buyerAddress || payload.address || "—");
+    const buyerEmail = String(payload.shippingAddress?.email || payload.buyerEmail || payload.email || "").trim();
+    const buyerZip = String(
+      postalCodeFromRecord(payload.shippingAddress) || payload.zip || payload.postalCode || payload.zipCode || payload.postcode || postalCodeFromRecord(payload.buyer) || postalCodeFromRecord(payload.customer) || postalCodeFromRecord(payload.address) || postalCodeFromAddress(buyerAddress) || ""
+    ).trim();
     const pay = String(payload.paymentMethod || payload.pay || "QR").toUpperCase();
     const paintKey = panelRenderKey({
       mode: "sheet",
@@ -1798,7 +1848,9 @@ button { font: inherit; color: inherit; }
     info.append(
       fieldRow("Họ tên", buyerName === "—" ? "" : buyerName),
       fieldRow("Số điện thoại / Zalo", buyerPhone === "—" ? "" : buyerPhone),
-      fieldRow("Địa chỉ giao hàng", buyerAddress === "—" ? "" : buyerAddress)
+      fieldRow("Email", buyerEmail),
+      fieldRow("Địa chỉ giao hàng", buyerAddress === "—" ? "" : buyerAddress),
+      fieldRow("Mã ZIP", buyerZip)
     );
     sheet.append(info);
     const storeSec = document.createElement("section");
@@ -1808,12 +1860,13 @@ button { font: inherit; color: inherit; }
     card.className = "store-card";
     const nameRow = document.createElement("div");
     nameRow.className = "store-name-row";
-    const storeDisplayName = branch || storeName;
+    const storeDisplayName = storeCardTitle(storeName, branch, chain);
+    const realBranch = branch && !isGenericOnlineLabel(branch) && branch !== storeDisplayName ? branch : "";
     nameRow.innerHTML = `
     <span class="store-logo" aria-hidden="true" style="background: ${CHAIN_LOGO[String(chain || "").toLowerCase()]?.color || "#071eb4"};">
       <p class="store-logo-text">${CHAIN_LOGO[String(chain || "").toLowerCase()]?.label || chain}</p>
     </span>
-    <div><strong>${storeDisplayName}</strong><span class="store-detail-state ${selectedTabState}">${storeTabStatusText(selectedTabState)}</span></div>
+    <div><strong>${storeDisplayName}</strong>${realBranch ? `<span class="store-branch">${realBranch}</span>` : ""}<span class="store-detail-state ${selectedTabState}">${storeTabStatusText(selectedTabState)}</span></div>
   `;
     card.append(nameRow);
     const list = document.createElement("div");

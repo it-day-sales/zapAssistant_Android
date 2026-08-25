@@ -95,6 +95,11 @@ const PANEL_MARKERS = [
   // Sync 18/08 (STV3-9995): logo cửa hàng theo màu chuỗi + nhãn chữ nhỏ.
   { marker: "CHAIN_LOGO", why: "logo cửa hàng màu theo chuỗi (port sidepanel.js)" },
   { marker: "store-logo-text", why: "nhãn chữ trong vòng tròn logo (port sidepanel.html)" },
+  // Sync 25/08 (upstream 2a4f94d, 0.1.35): tên thẻ cửa hàng + Email/ZIP + chuỗi aff-*.
+  { marker: "storeCardTitle", why: "tên thẻ cửa hàng bỏ nhãn 'Mua online' chung chung (port sidepanel.js 0.1.35)" },
+  { marker: "store-branch", why: "chi nhánh thật hiện thành dòng phụ dưới tên cửa hàng (port sidepanel.js 0.1.35)" },
+  { marker: "Mã ZIP", why: "phần người nhận thêm Email + Mã ZIP (port sidepanel.js 0.1.35)" },
+  { marker: "aff-shopee", why: "nhận diện chuỗi affiliate aff-bhx/aff-alibaba/aff-shopee (port sidepanel.js 0.1.35)" },
 ];
 
 // Asset folders that must stay byte-identical to the Chrome build.
