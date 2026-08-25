@@ -291,14 +291,29 @@ Giữ đúng map `ENTRY_POINTS` trong `scripts/build.mjs`:
 `src/page-main/`, `src/page-bridge/`, `src/popup/`, `src/sidepanel/` — mỗi thư
 mục một `index.ts`, esbuild IIFE target `firefox128` xuất thẳng vào `extension/`.
 
+## Baseline `web-ext lint` (25/08/2026 — yêu cầu giữ 0 error)
+
+`npm run lint`: **0 error / 25 warning / 1 notice**.
+
+- 25 × `UNSAFE_VAR_ASSIGNMENT` (innerHTML với giá trị động) trong
+  `session-engine.js`, `content.js`, `sidepanel.js` — kế thừa nguyên từ bundle
+  Chrome/iOS (cùng pattern upstream đang ship); nội dung đều do extension tự
+  sinh, không phải input trang. Chấp nhận; giảm dần khi upstream refactor.
+- 1 × notice `MISSING_DATA_COLLECTION_PERMISSIONS` —
+  `browser_specific_settings.gecko.data_collection_permissions` là thuộc tính
+  AMO yêu cầu cho submission mới: PHẢI khai trước khi ký AMO (extension gửi
+  thông tin người nhận/giỏ hàng tới agent-server → thuộc nhóm khai báo thu
+  thập dữ liệu, đối chiếu `extension/CHROME-WEB-STORE.md` bên affree).
+
 ## Việc còn lại
 
 1. QA trên thiết bị thật theo checklist trên (chưa chạy — repo này dựng trong
    môi trường không có Firefox/Android).
 2. Web app: bridge client postMessage dùng chung iOS + Firefox (hợp đồng §8) —
    làm khi chạy thử end-to-end xác nhận cần.
-3. Ký AMO unlisted (`web-ext sign --channel unlisted`, cần API key AMO); chuẩn
-   bị source-submission cho bundle esbuild. Sau đó cân nhắc AMO listed.
+3. Ký AMO unlisted (`web-ext sign --channel unlisted`, cần API key AMO): khai
+   `gecko.data_collection_permissions` (xem baseline lint ở trên) + chuẩn bị
+   source-submission cho bundle esbuild. Sau đó cân nhắc AMO listed.
 4. Lần sync chung với upstream + iOS: chuỗi `prepare_unsupported` trung tính,
    AbortController cho fetch token, hợp nhất cách reconcile `page-bridge.js`
    (upstream) ↔ `page-bridge-main.js` (mobile).
