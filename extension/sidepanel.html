@@ -1,0 +1,784 @@
+<!doctype html>
+<html lang="vi">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Đơn hàng Zapee</title>
+  <style>
+    /* UI ưu tiên companion Co.op local (browser-extension-legacy-coop) */
+    :root {
+      color-scheme: light;
+      --ink: #17241f;
+      --muted: #53645e;
+      --line: #dce5e1;
+      --green: #087d68;
+      --green-soft: #e0f6ef;
+      --red: #db4242;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    [hidden] {
+      display: none !important;
+    }
+
+    html,
+    body {
+      min-width: 300px;
+      min-height: 100%;
+      margin: 0;
+      background: #f5f7f6;
+      color: var(--ink);
+    }
+
+    /* Luôn chừa chỗ cho thanh cuộn dọc. Nếu không: thanh cuộn hiện → viewport
+       hẹp đi ~15px → khớp @media (max-width: 340px) → padding co lại → nội dung
+       RỘNG hơn nên THẤP hơn → hết tràn → bỏ thanh cuộn → viewport rộng lại →
+       lặp vô hạn. Đó là hiện tượng nhấp nháy + cuộn liên tục ở một vài bề rộng. */
+    html {
+      scrollbar-gutter: stable;
+    }
+
+    button {
+      font: inherit;
+      color: inherit;
+    }
+
+    .next-store-btn {
+      width: calc(100% - 32px);
+      margin: 4px 16px 16px;
+      padding: 12px 14px;
+      border: 0;
+      border-radius: 12px;
+      background: var(--green);
+      color: #fff;
+      font-weight: 800;
+      cursor: pointer;
+      box-shadow: 0 8px 20px rgba(8, 125, 104, .22);
+    }
+
+    .next-store-btn:disabled {
+      cursor: wait;
+      opacity: .7;
+    }
+
+    .store-tabs {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      overflow-y: hidden;
+      padding: 12px 12px 10px;
+      border-bottom: 1px solid var(--line);
+      background: #fbfdfc;
+      overscroll-behavior-inline: contain;
+      /* Không dùng scroll-snap: mỗi lần repaint dải tab bị dựng lại, trình duyệt
+         re-snap và giành quyền cuộn với đoạn khôi phục scrollLeft trong index.ts. */
+      scrollbar-color: rgba(8, 125, 104, .48) transparent;
+      scrollbar-gutter: stable;
+      scrollbar-width: thin;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .store-tabs::-webkit-scrollbar {
+      height: 6px;
+    }
+
+    .store-tabs::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    .store-tabs::-webkit-scrollbar-thumb {
+      border-radius: 999px;
+      background: rgba(8, 125, 104, .48);
+    }
+
+    .store-tab {
+      display: flex;
+      flex: 0 0 calc((100% - 8px) / 2);
+      min-width: 160px;
+      min-height: 62px;
+      align-items: center;
+      gap: 9px;
+      padding: 9px 11px;
+      border: 1px solid #d9e3df;
+      border-radius: 13px;
+      background: #fff;
+      color: #596863;
+      cursor: pointer;
+      text-align: left;
+      white-space: nowrap;
+    }
+
+    .store-tab.active {
+      border-color: var(--green);
+      background: #effaf6;
+      color: #105e52;
+      box-shadow: 0 0 0 1px rgba(8, 125, 104, .08);
+    }
+
+    .store-tab-dot {
+      --store-dot-halo: transparent;
+      flex: 0 0 9px;
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: #9ca3af;
+    }
+
+    .store-tab.ordering .store-tab-dot {
+      background: #f5a61d;
+      --store-dot-halo: rgba(245, 166, 29, .24);
+    }
+
+    .store-tab.done .store-tab-dot {
+      background: #18a46f;
+      --store-dot-halo: rgba(24, 164, 111, .24);
+    }
+
+    .store-tab.ordering .store-tab-dot,
+    .store-tab.done .store-tab-dot {
+      animation: store-tab-pulse 1.45s ease-in-out infinite;
+    }
+
+    .store-tab-logo {
+      display: grid;
+      flex: 0 0 28px;
+      width: 28px;
+      height: 28px;
+      place-items: center;
+      border-radius: 50%;
+      background: #071eb4;
+      color: #fff;
+      font-size: 16px;
+      font-weight: 500;
+      box-shadow: 0 3px 8px rgba(0, 19, 156, .2);
+    }
+
+    .store-tab-copy {
+      display: flex;
+      min-width: 0;
+      flex: 1;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 2px;
+      line-height: 1.2;
+    }
+
+    .store-tab-copy strong {
+      max-width: 100%;
+      overflow: hidden;
+      font-size: 13px;
+      text-overflow: ellipsis;
+    }
+
+    /* Cắt bằng ellipsis thay vì xuống dòng: nếu cho wrap, "Đang đặt hàng" đổi
+       1↔2 dòng theo bề rộng khiến chiều cao dải tab phụ thuộc bề rộng — đúng
+       kiểu liên hệ ngược sinh ra vòng lặp thanh cuộn. */
+    .store-tab-copy small {
+      display: block;
+      max-width: 100%;
+      overflow: hidden;
+      color: #7c8a85;
+      font-size: 12px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .store-tab.ordering .store-tab-copy small {
+      color: #c97800;
+      font-weight: 700;
+    }
+
+    .store-tab.done .store-tab-copy small {
+      color: #13865e;
+      font-weight: 700;
+    }
+
+    @keyframes store-tab-pulse {
+      0%, 100% {
+        opacity: .45;
+        box-shadow: 0 0 0 0 currentColor;
+        transform: scale(.88);
+      }
+
+      50% {
+        opacity: 1;
+        box-shadow: 0 0 0 4px var(--store-dot-halo);
+        transform: scale(1.08);
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .store-tab-dot {
+        animation: none;
+      }
+    }
+
+    .order-success {
+      display: flex;
+      min-height: 360px;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 34px 20px 26px;
+      text-align: center;
+    }
+
+    .order-success-check {
+      display: grid;
+      width: 72px;
+      height: 72px;
+      place-items: center;
+      border-radius: 50%;
+      background: #dff7ed;
+      color: var(--green);
+      font-size: 40px;
+      font-weight: 900;
+      box-shadow: 0 10px 25px rgba(8, 125, 104, .16);
+    }
+
+    .order-success h1 {
+      margin: 18px 0 0;
+      font-size: 20px;
+      line-height: 1.35;
+    }
+
+    .order-success p {
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .order-success-code {
+      display: flex;
+      width: 100%;
+      max-width: 300px;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 20px;
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #f8fbfa;
+    }
+
+    .order-success-code span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .order-success-code strong {
+      overflow-wrap: anywhere;
+      font-size: 14px;
+    }
+
+    .order-success .next-store-btn {
+      width: 100%;
+      max-width: 300px;
+      margin: 22px 0 0;
+    }
+
+    .panel-shell {
+      min-height: 100vh;
+      padding: 0 12px 24px;
+    }
+
+    /* Brand header — mirror AppHeader logo block (red-box on Zapee web) */
+    .brand-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 0 -12px 12px;
+      padding: 12px 14px 11px;
+      border-bottom: 1px solid rgba(255, 255, 255, .5);
+      background: rgba(255, 255, 255, .82);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+    }
+
+    .brand-header img {
+      height: 32px;
+      width: auto;
+      max-width: 65px;
+      object-fit: contain;
+      flex-shrink: 0;
+      display: block;
+    }
+
+    .brand-copy {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      line-height: 1.25;
+    }
+
+    .brand-badge-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .brand-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: #059669;
+      color: #fff;
+      font-size: 9px;
+      font-weight: 800;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      box-shadow: 0 1px 3px rgba(5, 150, 105, .25);
+    }
+
+    .brand-tagline {
+      font-size: 11px;
+      color: #64748b;
+    }
+
+    .brand-tagline strong {
+      color: #334155;
+      font-weight: 600;
+    }
+
+    .brand-tagline span {
+      display: block;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .empty-state {
+      margin-top: 4px;
+      padding: 22px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: #fff;
+    }
+
+    .empty-state strong {
+      font-size: 18px;
+    }
+
+    .empty-state p {
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .empty-steps {
+      margin: 14px 0 0;
+      padding: 0;
+      list-style: none;
+      display: grid;
+      gap: 8px;
+    }
+
+    .empty-steps li {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: #f0f7f4;
+      color: #3a4f49;
+      font-size: 12.5px;
+      line-height: 1.45;
+    }
+
+    .empty-steps .n {
+      flex: 0 0 22px;
+      width: 22px;
+      height: 22px;
+      border-radius: 999px;
+      background: var(--green);
+      color: #fff;
+      font-size: 12px;
+      font-weight: 800;
+      display: grid;
+      place-items: center;
+    }
+
+    .order-sheet {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      background: #fff;
+      box-shadow: 0 12px 30px rgba(22, 56, 45, .08);
+    }
+
+    .order-header {
+      padding: 16px 16px 12px;
+    }
+
+    .order-header h1 {
+      margin: 0;
+      font-size: 17px;
+      line-height: 1.35;
+      letter-spacing: -.25px;
+    }
+
+    .order-header small {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    .info-section,
+    .store-section {
+      padding: 14px 16px;
+    }
+
+    .info-section h2,
+    .store-section>h2 {
+      margin: 0 0 13px;
+      color: #51635c;
+      font-size: 12px;
+      letter-spacing: .75px;
+    }
+
+    .info-field {
+      margin-top: 11px;
+    }
+
+    .info-field>span {
+      display: block;
+      margin-bottom: 5px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .info-field>div {
+      display: flex;
+      min-height: 48px;
+      align-items: center;
+      gap: 8px;
+      padding: 9px 9px 9px 12px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fcfdfd;
+    }
+
+    .info-field strong {
+      min-width: 0;
+      flex: 1;
+      overflow-wrap: anywhere;
+      color: #26342f;
+      font-size: 15px;
+      line-height: 1.4;
+    }
+
+    /* Nút sao chép — khớp FieldCopyButton của components/OrderInfoSection.tsx
+       (28px, bo 8px, viền slate-200, hover/đã-copy màu emerald). */
+    .copy-button {
+      display: grid;
+      flex: 0 0 28px;
+      width: 28px;
+      height: 28px;
+      padding: 0;
+      place-items: center;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      background: #fff;
+      color: #64748b;
+      cursor: pointer;
+      transition: border-color .15s, background-color .15s, color .15s;
+    }
+
+    .copy-icon-button svg {
+      width: 16px;
+      height: 16px;
+    }
+
+    .copy-button:hover {
+      border-color: #6ee7b7;
+      background: #ecfdf5;
+      color: #059669;
+    }
+
+    .copy-button.is-copied {
+      border-color: #6ee7b7;
+      background: #ecfdf5;
+      color: #059669;
+    }
+
+    .store-section {
+      padding-top: 20px;
+    }
+
+    .store-card {
+      padding: 13px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #fff;
+    }
+
+    .store-name-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .store-logo {
+      display: grid;
+      flex: 0 0 38px;
+      width: 38px;
+      height: 38px;
+      place-items: center;
+      border-radius: 50%;
+      box-shadow: 0 3px 8px rgba(0, 19, 156, .2);
+      overflow: hidden;
+      position: relative;
+    }
+
+    .store-logo-text {
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+      text-transform: capitalize;
+      font-size: 11px;
+      font-weight: 700;
+      color: #000;
+      white-space: nowrap;
+    }
+
+    .store-name-row>div {
+      display: flex;
+      min-width: 0;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .store-name-row strong {
+      font-size: 15px;
+    }
+
+    .store-name-row span:last-child,
+    .store-name-row .store-branch {
+      overflow: hidden;
+      color: var(--muted);
+      font-size: 12px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .store-name-row .store-detail-state.ordering {
+      color: #c97800;
+      font-weight: 700;
+    }
+
+    .store-name-row .store-detail-state.done {
+      color: #13865e;
+      font-weight: 700;
+    }
+
+    .order-items {
+      margin-top: 10px;
+    }
+
+    .order-items-empty {
+      margin: 10px 0 2px;
+      padding: 10px 0;
+      border-top: 1px solid #edf1ef;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .order-item {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 10px 0;
+      border-top: 1px solid #edf1ef;
+    }
+
+    .item-thumb {
+      display: grid;
+      flex: 0 0 36px;
+      width: 36px;
+      height: 36px;
+      place-items: center;
+      border: 1px solid #edf1ef;
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    .item-thumb img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      border-radius: inherit;
+      object-fit: contain;
+    }
+
+    .item-copy {
+      display: flex;
+      min-width: 0;
+      flex: 1;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .item-copy strong {
+      overflow: hidden;
+      font-size: 13px;
+      line-height: 1.35;
+      text-overflow: ellipsis;
+    }
+
+    .item-qty {
+      color: var(--muted);
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .item-price {
+      color: var(--red);
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .store-total {
+      display: flex;
+      justify-content: space-between;
+      padding-top: 11px;
+      border-top: 1px solid var(--line);
+      font-size: 14px;
+    }
+
+    .store-total strong:last-child {
+      color: var(--red);
+    }
+
+    .store-card>p {
+      margin: 11px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    /* Single status under Tổng đơn — no second progress/grand-total block */
+    .order-status {
+      display: flex;
+      width: 100%;
+      margin-top: 11px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      background: var(--green-soft);
+      color: #0b6254;
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1.4;
+    }
+
+    .order-status.warn {
+      background: #fff6e8;
+      color: #9a6700;
+    }
+
+    .order-status.error {
+      background: #fff1ef;
+      color: #a43a31;
+    }
+
+    .connection-error-detail {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-top: 8px;
+      padding: 8px 10px;
+      border: 1px solid #f2c7c2;
+      border-radius: 8px;
+      background: #fff8f7;
+    }
+
+    .connection-error-detail code {
+      min-width: 0;
+      color: #7d2e27;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .connection-error-detail .copy-button {
+      width: auto;
+      height: auto;
+      flex: none;
+      background: #fff;
+      padding: 6px 8px;
+      border: 1px solid #e4aaa4;
+      border-radius: 6px;
+      color: #7d2e27;
+      font-size: 11px;
+    }
+
+    .payment-note {
+      margin: 5px 16px 16px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .disclaimer {
+      margin: 0;
+      padding: 12px 16px;
+      border-bottom: 1px solid #d9ebe5;
+      background: #eef9f5;
+      color: #52645e;
+      font-size: 11px;
+      line-height: 1.5;
+    }
+
+    .open-btn {
+      display: block;
+      width: calc(100% - 32px);
+      margin: 0 16px 16px;
+      padding: 12px;
+      border: 0;
+      border-radius: 12px;
+      background: var(--green);
+      color: #fff;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .open-btn:hover {
+      filter: brightness(1.05);
+    }
+
+    @media (max-width: 340px) {
+      .panel-shell {
+        padding-inline: 8px;
+      }
+
+      .info-section,
+      .store-section {
+        padding-inline: 12px;
+      }
+
+      .item-price {
+        font-size: 12px;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <main class="panel-shell" id="root"></main>
+  <script src="sidepanel.js"></script>
+</body>
+
+</html>

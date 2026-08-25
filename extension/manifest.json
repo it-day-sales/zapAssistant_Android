@@ -1,0 +1,95 @@
+{
+  "manifest_version": 3,
+  "name": "ZapAssist",
+  "description": "Trợ lý Zapee hướng dẫn và hỗ trợ hoàn tất đơn hàng đã tạo trên Zapee tại các website bán lẻ được hỗ trợ.",
+  "version": "0.1.35",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "zapee-assistant@zapee.one",
+      "strict_min_version": "128.0"
+    },
+    "gecko_android": {
+      "strict_min_version": "128.0"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "permissions": [
+    "storage",
+    "scripting"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "scripts": [
+      "background.js"
+    ]
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "page-bridge.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "session-engine.js",
+        "content.js"
+      ],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "http://localhost:3000/*",
+        "http://localhost:3002/*",
+        "http://zapee.test/*",
+        "http://*.zapee.test/*",
+        "https://gia-quanh-day.vercel.app/*",
+        "https://*.timdaythay.com/*",
+        "https://*.zapee.one/*"
+      ],
+      "js": [
+        "bridge-content.js"
+      ],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "page-bridge-main.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "mascot/*",
+        "brand/*",
+        "icons/*",
+        "page-bridge-main.js"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ]
+}
