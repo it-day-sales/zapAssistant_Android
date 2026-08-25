@@ -2547,6 +2547,17 @@ ${guideHighlightCss({
         }));
       } catch {
       }
+      try {
+        // iOS Safari: StorageEvent phát từ isolated world không tới được React
+        // của trang — nhờ page-bridge-main.js (MAIN world) phát lại. B5/B7.
+        window.postMessage({
+          source: "zapee-ext-bridge",
+          cmd: "storage_event",
+          key: "USER_LOCATION",
+          newValue: JSON.stringify(locationValue)
+        }, location.origin);
+      } catch {
+      }
       return { ready: true, changed };
     } catch {
       return { ready: false, changed: false };
@@ -6857,6 +6868,9 @@ ${guideHighlightCss({
             storeKey: message.storeKey
           }
         }));
+        // iOS: bridge-content.js đã post bản postMessage cho trang — thêm break
+        // để không rơi xuống case dưới tạo bản postMessage trùng lặp.
+        break;
       case "zapee_progress_event":
         window.postMessage({ source: "zapee-extension", ...message }, location.origin);
         break;

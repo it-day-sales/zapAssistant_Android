@@ -37,6 +37,66 @@
       button:hover {
         background: #15803d;
       }
+
+      /* ---- màn chẩn đoán (chỉ có ở bản iOS — xem PORTING.md "Màn chẩn đoán").
+         Mục đích: người dùng trên iPad tự đọc được vì sao extension "không hiện
+         gì", và copy toàn bộ gửi đi, KHÔNG cần nối cáp vào máy Mac.
+         Các rule dưới đây CHỈ CHÈN THÊM, không sửa rule nào của bản Chrome — nhờ
+         vậy `npm run parity` giữ được bất biến "chỉ được chèn" cho file này. */
+      body {
+        width: 320px; /* ghi đè 220px phía trên: cần rộng hơn để đọc chẩn đoán */
+      }
+
+      .diag {
+        margin-top: 12px;
+        padding-top: 10px;
+        border-top: 1px solid #e5e7eb;
+      }
+      .diag > summary {
+        font-size: 12px;
+        font-weight: 600;
+        color: #374151;
+        cursor: pointer;
+      }
+      .diag-row {
+        display: flex;
+        gap: 6px;
+        margin-top: 6px;
+        font-size: 11.5px;
+        line-height: 1.35;
+      }
+      .diag-row > span:first-child {
+        flex: 0 0 96px;
+        color: #6b7280;
+      }
+      .diag-row > span:last-child {
+        min-width: 0;
+        overflow-wrap: anywhere;
+        color: #111827;
+      }
+      .diag-ok { color: #15803d; font-weight: 600; }
+      .diag-bad { color: #b91c1c; font-weight: 600; }
+      .diag-warn { color: #b45309; font-weight: 600; }
+      .diag-actions { display: flex; gap: 6px; margin-top: 10px; }
+      .diag-actions button { font-size: 12px; padding: 6px 8px; }
+      .diag-actions button.secondary { background: #e5e7eb; color: #1f2937; }
+      .diag-log {
+        max-height: 150px;
+        margin-top: 8px;
+        padding: 6px;
+        overflow-y: auto;
+        border-radius: 6px;
+        background: #f9fafb;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 10.5px;
+        line-height: 1.45;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        color: #374151;
+      }
+      /* Android (F3): Fenix mở popup gần full màn hình — bỏ bề rộng cứng,
+         ghi đè 320px của bản iOS phía trên. */
+      body { width: auto; max-width: 100%; min-width: 0; }
     </style>
   </head>
   <body>

@@ -798,8 +798,10 @@ if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
         return true;
       }
       case "zapee_prepare_retailer_tab": {
-        // iOS không tạo được background tab (B3) — trang phải tự điều hướng.
-        sendResponse({ ok: false, error: "prepare_unsupported_ios" });
+        // Giữ single-tab như iOS (B3/D3) dù Fenix có tabs.create — một code path
+        // cho mọi bản mobile; trang phải tự điều hướng. Chuỗi lỗi chỉ để chẩn
+        // đoán: trang xử lý theo !ok, đừng feature-detect theo đúng chuỗi này.
+        sendResponse({ ok: false, error: "prepare_unsupported_android" });
         return void 0;
       }
       case "zapee_cancel_prepared_retailer_tab": {
