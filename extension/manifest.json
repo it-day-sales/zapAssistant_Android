@@ -61,7 +61,8 @@
         "https://*.zapee.one/*"
       ],
       "js": [
-        "bridge-content.js"
+        "bridge-content.js",
+        "zapee-order-reader.js"
       ],
       "run_at": "document_start"
     },

@@ -248,6 +248,20 @@
       );
     }
 
+    // Android (D5): reader tự nhặt đơn từ storage trang Zapee — không thấy dòng
+    // này = chưa từng nhặt được gì (chưa mở màn đặt hàng, hoặc web đổi cấu trúc).
+    const reader = state.orderReader;
+    if (reader) {
+      const importedList = Array.isArray(reader.imported) ? reader.imported : [];
+      const skippedList = Array.isArray(reader.skipped) ? reader.skipped : [];
+      row(
+        details,
+        "Đơn từ trang Zapee",
+        `${importedList.length ? `đã nhặt: ${importedList.join(", ")}` : "chưa nhặt được cửa hàng nào"}${skippedList.length ? ` · bỏ qua: ${skippedList.join("; ")}` : ""} · ${ageText(reader.at)}`,
+        importedList.length ? "diag-ok" : "diag-warn"
+      );
+    }
+
     const engine = state.sessionEngine;
     row(
       details,

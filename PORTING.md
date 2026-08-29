@@ -117,6 +117,8 @@ Kế thừa nguyên vẹn từ bản iOS (các "B" — xem PORTING.md bên `zape
   chiếu** — giữ làm baseline để diff khi port panel. Lưu ý: `sidepanel.js` chứa
   `chrome.windows.getCurrent` (không có trên Android) — vô hại vì file không
   bao giờ được nạp; `web-ext lint` có thể cảnh báo, đã ghi nhận.
+- `zapee-order-reader.js` — **ANDROID-ONLY** (D5): tự nhặt đơn từ storage trang
+  Zapee, xem mục riêng bên dưới; gác bằng `npm run test:reader`.
 
 ### Khác biệt hành vi so với bản Chrome (chấp nhận trên Android)
 
@@ -198,6 +200,13 @@ Chuỗi nhân-quả (dừng ở mắt xích đứt đầu tiên) — **thêm m�
   theo đúng chuỗi `_ios`/`_android`; sẽ thống nhất chuỗi trung tính
   `prepare_unsupported` cho cả ba bản ở lần sync chung, breaking change hai bên).
 - **D4 — `sidepanel.*` giữ lại không tham chiếu** làm baseline diff (như iOS).
+- **D5 — "tự nhặt đơn" từ trang Zapee, KHÔNG sửa web (29/08, yêu cầu của user
+  — "tuyệt đối cấm" sửa repo affree)**: web production không có phía gửi
+  postMessage và tắt luồng extension trên mobile → extension tự đọc đơn từ
+  storage của trang (xem mục "Tự nhặt đơn" bên dưới). Hợp đồng §8 vẫn giữ
+  nguyên giá trị: nếu SAU NÀY web triển khai phía gửi, handoff thật luôn được
+  ưu tiên hơn bản reader nhặt (background bỏ qua import khi đã có handoff thật
+  còn TTL hoặc phiên đang chạy).
 
 ## Hợp đồng message (bridge ↔ trang web — cho team web app)
 
@@ -216,6 +225,43 @@ extension-handoff.ts` chỉ dùng `window.chrome.runtime.sendMessage(EXT_ID, …
 (không tồn tại trên Firefox lẫn Safari). Extension test được đầy đủ qua
 postMessage tay (xem QA #3). Khi chạy thử end-to-end xác nhận cần, bước kế là
 viết bridge client dùng chung iOS + Firefox trong affree theo hợp đồng trên.
+
+## Tự nhặt đơn từ trang Zapee (`zapee-order-reader.js` — D5)
+
+Chạy CÙNG entry manifest với `bridge-content.js` (chỉ trên origin
+control-surface). Mỗi 1,5s (khi tab hiển thị) đọc 3 khóa storage của web:
+
+| Khóa | Ở đâu | Là gì (nguồn: affree @ `53fe94d` — CHỈ ĐỌC) |
+|---|---|---|
+| `zapee_cbz_state` | sessionStorage | `CbzPersisted` của `CobrowseSession.tsx`: orderKey, step, active, status, `carts: Line[][]` (name/qty/unitPrice/image), pays, slots, defaultMode… |
+| `gqd_cart` | localStorage | `CartItem[]` (`lib/cart.ts`): product + offer (store.chain/id/terminalCode, productUrl) — nguồn chain/URL cho từng dòng |
+| `gqd_buyer` | localStorage | `BuyerProfile` (`lib/profile.ts`): name/email/phone/address/zip |
+
+Reader ghép `cbz.carts[i]` với nhóm giỏ (replicate `cartGroupKey`: Co.op theo
+`coop:<terminalCode>`, còn lại theo store.id; khớp bằng key trong orderKey +
+độ trùng tên sản phẩm), dựng payload đúng shape `startExtensionOrder` của web
+(products/requestedProducts/shippingAddress/paymentMethod/slot/orderStores/
+nextStore…), rồi gửi `zapee_scraped_order` xuống background. Background:
+gác `senderIsControlSurface` → mint token qua `GET {webApp}/api/agent/token`
+(route này của web CHÍNH THỨC cho extension tự mint — xem comment trong
+`app/api/agent/token/route.ts`) → lưu `pendingHandoff:<chain>` đánh dấu
+`importedBy:"order-reader"`. Khi user mở trang bán lẻ (web mobile `window.open`
+trang chủ chuỗi), `zapee_engine_boot` khớp host → claim → panel + WS chạy đủ
+payload; terminal Co.op tự enrich lúc claim (`enrichCoopHandoffCheckout`).
+
+Luật an toàn: (1) chỉ origin control-surface; (2) không đè `activeOrderHandoff`
+(phiên đang chạy); (3) handoff THẬT từ web (không có `importedBy`) còn TTL thì
+không bị reader thay; (4) mỗi lần re-import dọn đúng các pending do reader tạo.
+
+Giới hạn chấp nhận (v1): `automationMode` cố định `"manual"` (lựa chọn
+auto/manual không được web persist); `deliveryMode:"delivery"`, `note:null`,
+`accountMode:"login"`; sự kiện hoàn tất về trang Zapee production không được
+web lắng nghe (panel trên trang bán lẻ là UX chính). ĐÁNH ĐỔI: 3 khóa storage
+trên là chi tiết nội bộ của web — web đổi shape là reader mù (popup hiện
+"chưa nhặt được"); `npm run test:reader` (15 case fixture đúng shape hiện tại)
+là hàng rào — web đổi thì sửa fixture + reader cùng nhau và ghi vào đây.
+`zapee-order-reader.js` là file ANDROID-ONLY (không có bên Chrome/iOS): ngoài
+FILE_RULES parity, gác bằng test:reader + grep-gate.
 
 ## Sync log
 
@@ -283,13 +329,15 @@ viết bridge client dùng chung iOS + Firefox trong affree theo hợp đồng t
    với **`shimInstalled: true`** và `contentReady` (chứng minh shim + forward +
    event page wake + promise-storage chạy trên Gecko). Đây là mục PHẢI kiểm tra
    đầu tiên trước mọi mục sau.
-3. **Bridge**: mở trang thuộc origin control-surface (vd `zapee.timdaythay.com`)
-   → từ console remote-debugging chạy:
+3. **Nhặt đơn từ web production (D5 — luồng chính)**: mở
+   `https://zapee.timdaythay.com` → thêm hàng Co.op/BHX vào giỏ → bấm đặt hàng
+   tới màn phiên đặt hàng → mở popup Zap-XuXu: dòng **"Đơn từ trang Zapee"**
+   phải hiện `đã nhặt: coop, bhx…`. Sau đó bấm nút mở trang cửa hàng của web
+   (hoặc tự gõ cooponline.vn) → panel đơn hàng hiện trên trang bán lẻ với đúng
+   sản phẩm/người nhận.
+   (Debug bridge thủ công vẫn được: từ console remote-debugging chạy
    `window.postMessage({source:"zapee-web",requestId:"t1",payload:{type:"zapee_ping"}}, location.origin)`
-   → nhận `{source:"zapee-extension", requestId:"t1", response:{type:"zapee_pong"}}`.
-   Gửi tiếp một `zapee_order_handoff` giả → response
-   `{ok:true, claimedTabId:null, tabOwner:"page-navigation", entryUrl}` →
-   tự `location.href = entryUrl`.
+   → nhận `{source:"zapee-extension", requestId:"t1", response:{type:"zapee_pong"}}`.)
 4. **Engine + WS**: trang bán lẻ claim handoff (`zapee_engine_boot` →
    `claim`), panel bottom-sheet hiện; xoay ngang/máy tablet → side-sheet; panel
    không đè lên URL bar thu gọn của Fenix; **WS mở được** (mắt xích #8 —
@@ -332,9 +380,11 @@ mục một `index.ts`, esbuild IIFE target `firefox128` xuất thẳng vào `ex
 ## Việc còn lại
 
 1. QA trên thiết bị thật theo checklist trên (chưa chạy — repo này dựng trong
-   môi trường không có Firefox/Android).
-2. Web app: bridge client postMessage dùng chung iOS + Firefox (hợp đồng §8) —
-   làm khi chạy thử end-to-end xác nhận cần.
+   môi trường không có Firefox/Android). Ưu tiên bước 3 (nhặt đơn từ web
+   production).
+2. ~~Web app: bridge client postMessage~~ — KHÔNG còn bắt buộc: D5 (order-reader)
+   chạy thẳng với web production. Hợp đồng §8 giữ làm đường chính danh nếu
+   team web triển khai sau (handoff thật tự động được ưu tiên hơn bản nhặt).
 3. Ký AMO unlisted (`web-ext sign --channel unlisted`, cần API key AMO): khai
    `gecko.data_collection_permissions` (xem baseline lint ở trên) + chuẩn bị
    source-submission cho bundle esbuild. Sau đó cân nhắc AMO listed.

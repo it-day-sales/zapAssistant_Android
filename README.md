@@ -104,9 +104,18 @@ npm run build:xpi    # đóng gói .zip/.xpi vào web-ext-artifacts/ (để ký 
    sách "remote code" (extension nhận lệnh `dom_op` từ agent-server — xem
    `extension/CHROME-WEB-STORE.md` bên repo affree về vấn đề tương tự với Chrome).
 
+## Dùng với trang Zapee thật (không cần sửa/chạy web)
+
+Extension **tự nhặt đơn** từ trang Zapee production (D5 — `zapee-order-reader.js`
+đọc giỏ hàng/hồ sơ/phiên đặt hàng từ storage của trang, tự mint token qua API
+công khai của web): cứ mở `https://zapee.timdaythay.com` trên Firefox Nightly,
+tạo đơn như bình thường tới màn đặt hàng, rồi mở trang cửa hàng — panel của
+extension sẽ hiện trên trang bán lẻ với đúng sản phẩm/người nhận. Kiểm tra
+nhanh: popup Zap-XuXu → Chẩn đoán → dòng **"Đơn từ trang Zapee"**.
+
 ## Việc còn lại
 
 Xem mục **"Việc còn lại"** và **checklist QA trên thiết bị** trong
-[PORTING.md](PORTING.md) — đặc biệt: web app Zapee **chưa có** phía gửi
-postMessage (hợp đồng §8), nên luồng end-to-end từ trang Zapee thật cần thêm
-bridge client phía web (làm sau, khi chạy thử xác nhận cần).
+[PORTING.md](PORTING.md). Lưu ý D5: reader bám 3 khóa storage nội bộ của web
+(`zapee_cbz_state`/`gqd_cart`/`gqd_buyer`) — web đổi cấu trúc thì chạy
+`npm run test:reader` và sửa reader theo (PORTING.md mục "Tự nhặt đơn").

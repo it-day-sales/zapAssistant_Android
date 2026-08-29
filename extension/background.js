@@ -824,6 +824,79 @@ if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
         })().catch(() => sendResponse({ events: [] }));
         return true;
       }
+      // Android D5: đơn "tự nhặt" từ storage trang Zapee (zapee-order-reader.js)
+      // — web production không có phía gửi postMessage nên extension tự dựng
+      // handoff. Chỉ nhận từ origin control-surface; KHÔNG đụng phiên đang chạy;
+      // handoff thật từ web (không có importedBy) luôn được ưu tiên giữ nguyên.
+      case "zapee_scraped_order": {
+        void (async () => {
+          if (!await senderIsControlSurface(sender)) {
+            sendResponse({ ok: false, error: "origin_not_allowed" });
+            return;
+          }
+          const drafts = Array.isArray(message.drafts) ? message.drafts.slice(0, 8) : [];
+          if (!drafts.length) {
+            sendResponse({ ok: false, error: "empty" });
+            return;
+          }
+          const active = await getActiveHandoff();
+          // Dọn các pending do READER nhặt lần trước (đơn đã đổi) — pending do
+          // web gửi thật thì không rớ tới.
+          const all = await chrome.storage.session.get(null);
+          const staleReaderKeys = Object.entries(all)
+            .filter(([key, value]) => key.startsWith("pendingHandoff:") && value && value.importedBy === "order-reader")
+            .map(([key]) => key);
+          if (staleReaderKeys.length) await chrome.storage.session.remove(staleReaderKeys);
+          const imported = [];
+          const skipped = [];
+          for (const draft of drafts) {
+            const chain = String(draft?.chain || "").toLowerCase();
+            const entryUrl = String(draft?.entryUrl || "");
+            if (!chain || !entryUrl || !draft?.payload || typeof draft.payload !== "object") continue;
+            if (active && active.chain === chain) {
+              skipped.push(`${chain} (phiên đang chạy)`);
+              continue;
+            }
+            const existing = all[`pendingHandoff:${chain}`];
+            if (existing && existing.importedBy !== "order-reader" && Date.now() - Number(existing.receivedAt || 0) < TTL_MS) {
+              skipped.push(`${chain} (đã có handoff thật từ web)`);
+              continue;
+            }
+            const sessionId = `cbs-${chain}-reader-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+            const minted = await refreshHandoffToken({ sessionId, chain });
+            if (!minted) {
+              skipped.push(`${chain} (mint token thất bại)`);
+              continue;
+            }
+            const handoff = {
+              type: "zapee_order_handoff",
+              importedBy: "order-reader",
+              orderKey: String(message.orderKey || ""),
+              sessionId,
+              chain,
+              token: minted.token,
+              timestamp: minted.timestamp,
+              execMode: "manual",
+              entryUrl,
+              payload: { ...draft.payload, chain },
+              sourceTabId: typeof tabId === "number" ? tabId : void 0
+            };
+            await savePendingHandoff(handoff, tabId);
+            imported.push(chain);
+          }
+          void diagSet({
+            orderReader: {
+              at: new Date().toISOString(),
+              orderKey: String(message.orderKey || "").slice(0, 80),
+              imported,
+              skipped
+            }
+          });
+          void diagLog("bg", `scraped_order: nhặt [${imported.join(", ")}]${skipped.length ? ` · bỏ qua [${skipped.join("; ")}]` : ""}`);
+          sendResponse({ ok: imported.length > 0 || skipped.length > 0, imported, skipped });
+        })().catch((err) => sendResponse({ ok: false, error: err instanceof Error ? err.message : String(err) }));
+        return true;
+      }
 
       // ------------------------------------------------------ từ content.js
       case "zapee_content_ready": {

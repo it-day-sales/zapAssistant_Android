@@ -10,6 +10,7 @@
     "check": "node scripts/build.mjs --check-only",
     "parity": "node scripts/check-parity.mjs",
     "test:origin": "node scripts/test-origin-pattern.mjs",
+    "test:reader": "node scripts/test-order-reader.mjs",
     "lint": "web-ext lint --source-dir extension",
     "start:android": "web-ext run --target firefox-android --source-dir extension --firefox-apk org.mozilla.fenix",
     "start:desktop": "web-ext run --source-dir extension",
