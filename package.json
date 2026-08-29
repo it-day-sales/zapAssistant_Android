@@ -1,6 +1,6 @@
 {
   "name": "zapassist-firefox-android",
-  "version": "0.1.35",
+  "version": "0.1.45",
   "private": true,
   "type": "module",
   "description": "ZapAssist — Firefox for Android port of the Zapee Assistant browser extension",

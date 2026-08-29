@@ -475,8 +475,8 @@
     const deadline = Date.now() + timeoutMs;
     while (true) {
       const el = resolveLocator(locator);
-      const visible7 = el ? isElementVisible(el) : false;
-      const matched = state === "hidden" ? !visible7 : visible7;
+      const visible8 = el ? isElementVisible(el) : false;
+      const matched = state === "hidden" ? !visible8 : visible8;
       if (matched) return true;
       if (Date.now() >= deadline) return false;
       await sleep(POLL_INTERVAL_MS);
@@ -486,9 +486,9 @@
     const deadline = Date.now() + timeoutMs;
     while (true) {
       const el = resolveLocator(locator);
-      const visible7 = el ? isElementVisible(el) : false;
-      if (visible7) return true;
-      if (Date.now() >= deadline) return visible7;
+      const visible8 = el ? isElementVisible(el) : false;
+      if (visible8) return true;
+      if (Date.now() >= deadline) return visible8;
       await sleep(POLL_INTERVAL_MS);
     }
   }
@@ -523,14 +523,18 @@
   function newClickToken() {
     return `z${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
   }
-  function requestPageWorldClick(token) {
+  function requestPageWorldClick(token, preventDefaultNavigation = false) {
     return new Promise((resolve) => {
       if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage) {
         resolve(false);
         return;
       }
       try {
-        chrome.runtime.sendMessage({ type: PAGE_CLICK_MESSAGE, token }, (response) => {
+        chrome.runtime.sendMessage({
+          type: PAGE_CLICK_MESSAGE,
+          token,
+          ...preventDefaultNavigation ? { preventDefaultNavigation: true } : {}
+        }, (response) => {
           if (chrome.runtime.lastError) {
             resolve(false);
             return;
@@ -562,17 +566,26 @@
     el.dispatchEvent(new window.MouseEvent("mouseup", { ...mouseOptions, buttons: 0 }));
     el.dispatchEvent(new window.MouseEvent("click", { ...mouseOptions, buttons: 0 }));
   }
-  function isolatedClick(el) {
+  function isolatedClick(el, preventDefaultNavigation = false) {
     if (el instanceof HTMLElement) {
-      if (document.documentElement.hasAttribute(PAGE_BRIDGE_ATTR)) {
-        el.dispatchEvent(new Event(PAGE_ACTIVATE_EVENT, { bubbles: true, cancelable: true, composed: true }));
+      const blockDefault = (event) => {
+        const target = event.target;
+        if (target === el || target instanceof Node && el.contains(target)) event.preventDefault();
+      };
+      if (preventDefaultNavigation) document.addEventListener("click", blockDefault);
+      try {
+        if (document.documentElement.hasAttribute(PAGE_BRIDGE_ATTR)) {
+          el.dispatchEvent(new Event(PAGE_ACTIVATE_EVENT, { bubbles: true, cancelable: true, composed: true }));
+        }
+        el.click();
+      } finally {
+        if (preventDefaultNavigation) document.removeEventListener("click", blockDefault);
       }
-      el.click();
       return;
     }
     dispatchNativeClickFallback(el);
   }
-  async function clickElement(el) {
+  async function clickElement(el, preventDefaultNavigation = false) {
     if (!(el instanceof HTMLElement)) {
       dispatchNativeClickFallback(el);
       return;
@@ -580,11 +593,11 @@
     const token = newClickToken();
     el.setAttribute(PAGE_CLICK_ATTR, token);
     try {
-      if (await requestPageWorldClick(token)) return;
+      if (await requestPageWorldClick(token, preventDefaultNavigation)) return;
     } finally {
       el.removeAttribute(PAGE_CLICK_ATTR);
     }
-    isolatedClick(el);
+    isolatedClick(el, preventDefaultNavigation);
   }
   async function executeDomOp(msg) {
     const timeoutMs = msg.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -624,8 +637,8 @@
       case "is_visible": {
         if (!msg.locator) return { type: "zapee_dom_op_result", opId: msg.opId, ok: true, visible: false, currentUrl: location.href };
         const capped = Math.min(timeoutMs, 1e3);
-        const visible7 = await pollCurrentVisibility(msg.locator, capped);
-        return { type: "zapee_dom_op_result", opId: msg.opId, ok: true, visible: visible7, currentUrl: location.href };
+        const visible8 = await pollCurrentVisibility(msg.locator, capped);
+        return { type: "zapee_dom_op_result", opId: msg.opId, ok: true, visible: visible8, currentUrl: location.href };
       }
       case "click": {
         if (!msg.locator) return { type: "zapee_dom_op_result", opId: msg.opId, ok: false, error: "element_not_found", currentUrl: location.href };
@@ -633,7 +646,7 @@
         if (!el) return { type: "zapee_dom_op_result", opId: msg.opId, ok: false, error: "element_not_found", currentUrl: location.href };
         el.scrollIntoView({ block: "center" });
         el = resolveLocator(msg.locator) ?? el;
-        await clickElement(el);
+        await clickElement(el, msg.preventDefaultNavigation === true);
         return { type: "zapee_dom_op_result", opId: msg.opId, ok: true, currentUrl: location.href };
       }
       case "fill": {
@@ -885,10 +898,18 @@ ${selectors.noteAction}:focus-visible { outline: 3px solid rgba(245, 166, 35, .9
     }
     return blocks.join("\n");
   }
-  function pickNotePlacement(rect, noteWidth, gap = 12) {
+  function sideFits(side, rect, noteWidth, gap, viewportWidth) {
+    if (side === "right") return rect.right + gap + noteWidth <= viewportWidth - 8;
+    return rect.left - gap - noteWidth >= 8;
+  }
+  function pickNotePlacement(rect, noteWidth, gap = 12, preferred) {
     const viewportWidth = typeof window !== "undefined" ? window.innerWidth : 1024;
-    if (rect.right + gap + noteWidth <= viewportWidth - 8) return "right";
-    if (rect.left - gap - noteWidth >= 8) return "left";
+    if (preferred === "right" && sideFits("right", rect, noteWidth, gap, viewportWidth)) return "right";
+    if (preferred === "left" && sideFits("left", rect, noteWidth, gap, viewportWidth)) return "left";
+    if (preferred === "bottom") return "bottom";
+    if (preferred === "top") return "top";
+    if (sideFits("right", rect, noteWidth, gap, viewportWidth)) return "right";
+    if (sideFits("left", rect, noteWidth, gap, viewportWidth)) return "left";
     return "bottom";
   }
   function fillGuideNote(note, options) {
@@ -1228,6 +1249,8 @@ ${guideHighlightCss({ ring: ".mzHl", note: ".mzHlNote", noteAction: ".mzHlNote .
   var currentBadgeMark = "";
   var extraHighlights = [];
   var extraSurfaces = [];
+  var mainStickyNote = { key: "", placement: null };
+  var extraStickyNotes = [];
   var launcherEl = null;
   var launcherMascotEl = null;
   var launcherFallbackEl = null;
@@ -1617,7 +1640,25 @@ ${guideHighlightCss({ ring: ".mzHl", note: ".mzHlNote", noteAction: ".mzHlNote .
     if (host && (top === host || host.contains(top))) return false;
     return true;
   }
-  function layoutHighlight(el, highlight, badge, noteEl, noteText, mark, action) {
+  function locatorKey(locator) {
+    if (!locator) return "";
+    return JSON.stringify({
+      strategy: locator.strategy,
+      value: locator.value || "",
+      role: locator.role || "",
+      name: locator.name || "",
+      exact: Boolean(locator.exact)
+    });
+  }
+  function stickyFor(key, slot) {
+    if (slot && slot.key === key) return slot;
+    return { key, placement: null };
+  }
+  function resetStickyNotes() {
+    mainStickyNote = { key: "", placement: null };
+    extraStickyNotes = [];
+  }
+  function layoutHighlight(el, highlight, badge, noteEl, noteText, mark, action, sticky) {
     const rect = el.getBoundingClientRect();
     if (!rectIntersectsViewport(rect) || isCoveredByPageOverlay(el)) {
       highlight.style.display = "none";
@@ -1642,13 +1683,17 @@ ${guideHighlightCss({ ring: ".mzHl", note: ".mzHlNote", noteAction: ".mzHlNote .
     }
     if (!noteEl || !noteText) {
       if (noteEl) noteEl.style.display = "none";
+      sticky.placement = null;
       return;
     }
     noteEl.style.display = "block";
+    const tentative = sticky.placement ?? "right";
+    fillGuideNote(noteEl, { text: noteText, placement: tentative, action });
     const noteWidth = noteEl.offsetWidth || noteEl.getBoundingClientRect().width || 240;
     const noteHeight = noteEl.offsetHeight || noteEl.getBoundingClientRect().height || 44;
-    const placement = pickNotePlacement(rect, noteWidth);
-    fillGuideNote(noteEl, { text: noteText, placement, action });
+    const placement = pickNotePlacement(rect, noteWidth, 12, sticky.placement);
+    if (placement !== tentative) fillGuideNote(noteEl, { text: noteText, placement, action });
+    sticky.placement = placement;
     noteEl.style.left = `${placement === "right" ? rect.right + 12 : placement === "left" ? rect.left - noteWidth - 12 : clamp(rect.left, 8, Math.max(8, window.innerWidth - noteWidth - 8))}px`;
     noteEl.style.top = `${placement === "bottom" ? clamp(rect.bottom + 12, 8, Math.max(8, window.innerHeight - noteHeight - 8)) : clamp(rect.top + (rect.height - noteHeight) / 2, 8, Math.max(8, window.innerHeight - noteHeight - 8))}px`;
   }
@@ -1663,7 +1708,8 @@ ${guideHighlightCss({ ring: ".mzHl", note: ".mzHlNote", noteAction: ".mzHlNote .
       hideHighlightSurfaces();
       return;
     }
-    layoutHighlight(el, highlightEl, badgeEl, highlightNoteEl, currentNoteText, currentBadgeMark, currentNoteAction);
+    mainStickyNote = stickyFor(locatorKey(currentHighlightLocator), mainStickyNote);
+    layoutHighlight(el, highlightEl, badgeEl, highlightNoteEl, currentNoteText, currentBadgeMark, currentNoteAction, mainStickyNote);
     ensureExtraSurfaces(extraHighlights.length);
     extraSurfaces.forEach((surface, index) => {
       const extra = extraHighlights[index];
@@ -1671,6 +1717,7 @@ ${guideHighlightCss({ ring: ".mzHl", note: ".mzHlNote", noteAction: ".mzHlNote .
         surface.highlight.style.display = "none";
         surface.badge.style.display = "none";
         surface.note.style.display = "none";
+        extraStickyNotes[index] = { key: "", placement: null };
         return;
       }
       const extraEl = resolveLocator(extra.locator);
@@ -1678,8 +1725,10 @@ ${guideHighlightCss({ ring: ".mzHl", note: ".mzHlNote", noteAction: ".mzHlNote .
         surface.highlight.style.display = "none";
         surface.badge.style.display = "none";
         surface.note.style.display = "none";
+        extraStickyNotes[index] = { key: "", placement: null };
         return;
       }
+      extraStickyNotes[index] = stickyFor(locatorKey(extra.locator), extraStickyNotes[index]);
       layoutHighlight(
         extraEl,
         surface.highlight,
@@ -1687,9 +1736,11 @@ ${guideHighlightCss({ ring: ".mzHl", note: ".mzHlNote", noteAction: ".mzHlNote .
         surface.note,
         String(extra.note || "").trim(),
         String(extra.mark || "").trim(),
-        null
+        null,
+        extraStickyNotes[index]
       );
     });
+    extraStickyNotes.length = extraHighlights.length;
     unstackGuideNotes([highlightNoteEl, ...extraSurfaces.map((surface) => surface.note)]);
   }
   function onHighlightScroll() {
@@ -1874,6 +1925,7 @@ ${guideHighlightCss({ ring: ".mzHl", note: ".mzHlNote", noteAction: ".mzHlNote .
     currentNoteAction = null;
     currentBadgeMark = "";
     activeGuidance = null;
+    resetStickyNotes();
     clearPanelExtras();
     if (panelEl) panelEl.style.display = "none";
     if (miniEl) miniEl.style.display = "none";
@@ -2093,9 +2145,9 @@ ${guideHighlightCss({
       const rect = el.getBoundingClientRect();
       if (rect.top < 8 || rect.top > window.innerHeight * 0.7) continue;
       if (rect.left < window.innerWidth * 0.25) continue;
-      const area = rect.width * rect.height;
-      if (area < bestScore) {
-        bestScore = area;
+      const area2 = rect.width * rect.height;
+      if (area2 < bestScore) {
+        bestScore = area2;
         best = el.parentElement instanceof HTMLElement && isSmall(el.parentElement) && el.tagName === "SPAN" ? el.parentElement : el;
       }
     }
@@ -2378,42 +2430,6 @@ ${guideHighlightCss({
       paintHighlight(close);
     }
     schedulePoll(POLL_ACTIVE_MS);
-  }
-  function getCoopAdGuideState() {
-    if (dismissed) return "dismissed";
-    if (latchedClose?.isConnected && isVisible(latchedClose)) return "visible";
-    if (enabled && findAdClose()) return "visible";
-    return "idle";
-  }
-  function startCoopAdGuide(opts, hostname = location.hostname) {
-    log("startCoopAdGuide", {
-      hostname,
-      isCoop: isCoopHost(hostname),
-      execMode: opts?.execMode,
-      dismissed,
-      url: typeof location !== "undefined" ? location.href : ""
-    });
-    if (!isCoopHost(hostname)) return;
-    if (opts?.onAdVisible) onAdVisible = opts.onAdVisible;
-    if (opts?.onAdDismissed) onAdDismissed = opts.onAdDismissed;
-    if (opts?.execMode === "auto" || opts?.execMode === "manual") {
-      execMode = opts.execMode;
-    }
-    if (dismissed) {
-      log("startCoopAdGuide: already dismissed \u2192 onAdDismissed");
-      opts?.onAdDismissed?.();
-      return;
-    }
-    enabled = true;
-    lastDebugKey = "";
-    ensureStyles();
-    window.addEventListener("scroll", onGuideScroll, true);
-    if (timer === null) {
-      tick();
-      if (timer === null && enabled && !dismissed) {
-        schedulePoll(POLL_IDLE_MS);
-      }
-    }
   }
   function stopCoopAdGuide() {
     enabled = false;
@@ -3481,9 +3497,15 @@ ${guideHighlightCss({
 
   // src/content/coop-product-qty.ts
   function visible3(el) {
-    if (!(el instanceof HTMLElement)) return false;
+    if (!(el instanceof HTMLElement) || !el.isConnected) return false;
     const r = el.getBoundingClientRect();
-    return r.width > 0 && r.height > 0;
+    const left = Math.max(0, r.left);
+    const right = Math.min(window.innerWidth, r.right);
+    const top = Math.max(0, r.top);
+    const bottom = Math.min(window.innerHeight, r.bottom);
+    if (right <= left || bottom <= top) return false;
+    const hit = document.elementFromPoint((left + right) / 2, (top + bottom) / 2);
+    return hit === el || hit !== null && el.contains(hit);
   }
   function findQtyInput() {
     const sels = [
@@ -3493,8 +3515,9 @@ ${guideHighlightCss({
       "main input[type='number']"
     ];
     for (const s of sels) {
-      const el = document.querySelector(s);
-      if (el instanceof HTMLInputElement && visible3(el)) return el;
+      for (const el of document.querySelectorAll(s)) {
+        if (el instanceof HTMLInputElement && visible3(el)) return el;
+      }
     }
     return null;
   }
@@ -3506,8 +3529,9 @@ ${guideHighlightCss({
       "button[class*='plus']"
     ];
     for (const s of sels) {
-      const el = document.querySelector(s);
-      if (el instanceof HTMLElement && visible3(el)) return el;
+      for (const el of document.querySelectorAll(s)) {
+        if (visible3(el)) return el;
+      }
     }
     return null;
   }
@@ -3519,8 +3543,9 @@ ${guideHighlightCss({
       "button[class*='minus']"
     ];
     for (const s of sels) {
-      const el = document.querySelector(s);
-      if (el instanceof HTMLElement && visible3(el)) return el;
+      for (const el of document.querySelectorAll(s)) {
+        if (visible3(el)) return el;
+      }
     }
     return null;
   }
@@ -3539,22 +3564,22 @@ ${guideHighlightCss({
   async function setCoopProductQty(targetQty) {
     const target = Math.max(1, Math.min(20, Math.trunc(Number(targetQty) || 1)));
     const input = findQtyInput();
-    if (input) {
-      try {
-        input.scrollIntoView?.({ block: "center", behavior: "smooth" });
-      } catch {
-      }
-      showGuidance({
-        checkpointId: "coop-pdp-qty",
-        message: `Zapee \u0111ang t\xF4 s\xE1ng s\u1ED1 l\u01B0\u1EE3ng (\u2192 ${target}) \u2014 \u0111\u1EE3i m\u1ED9t ch\xFAt r\u1ED3i ch\u1EC9nh\u2026`,
-        highlightLocator: { strategy: "css", value: "input.rc-input-number-input, input[type='number']" }
-      });
-      await new Promise((r) => setTimeout(r, 2200));
-      input.focus();
-      setNativeValue3(input, String(target));
-      await new Promise((r) => setTimeout(r, 200));
-      if (readQty(input) === target) return true;
+    if (!input) return false;
+    try {
+      input.scrollIntoView?.({ block: "center", behavior: "smooth" });
+    } catch {
     }
+    showGuidance({
+      checkpointId: "coop-pdp-qty",
+      message: `Zapee \u0111ang t\xF4 s\xE1ng s\u1ED1 l\u01B0\u1EE3ng (\u2192 ${target}) \u2014 \u0111\u1EE3i m\u1ED9t ch\xFAt r\u1ED3i ch\u1EC9nh\u2026`,
+      highlightLocator: { strategy: "css", value: "input.rc-input-number-input, input[type='number']" }
+    });
+    await new Promise((r) => setTimeout(r, 2200));
+    if (!visible3(input)) return false;
+    input.focus();
+    setNativeValue3(input, String(target));
+    await new Promise((r) => setTimeout(r, 200));
+    if (readQty(input) === target) return true;
     let current = readQty(findQtyInput());
     let guard = 0;
     while (current < target && guard < 25) {
@@ -3573,7 +3598,8 @@ ${guideHighlightCss({
       current = readQty(findQtyInput());
       guard += 1;
     }
-    return readQty(findQtyInput()) === target;
+    const updatedInput = findQtyInput();
+    return updatedInput !== null && readQty(updatedInput) === target;
   }
   function productSkuFromUrl(url) {
     try {
@@ -4598,6 +4624,373 @@ ${guideHighlightCss({
     removeScrollGuard();
   }
 
+  // src/content/retailer-live-cart.ts
+  var activeSessionId = "";
+  var activeConfig = null;
+  var publishSnapshot = null;
+  var observer = null;
+  var timer3 = null;
+  var pollTimer = null;
+  var lastFingerprint = "";
+  var hasPublishedSelection = false;
+  var eventListenersAttached = false;
+  function hrefMatches(config) {
+    const needles = Array.isArray(config.urlIncludes) ? config.urlIncludes : [config.urlIncludes];
+    return needles.some((needle) => Boolean(needle) && location.href.includes(needle));
+  }
+  function selfOrQuery(root, selector) {
+    if (!selector) return root;
+    try {
+      if (root.matches(selector)) return root;
+    } catch {
+    }
+    return query(root, selector);
+  }
+  function query(root, selector) {
+    if (!selector) return null;
+    try {
+      return root.querySelector(selector);
+    } catch {
+      return null;
+    }
+  }
+  function queryAll(root, selector) {
+    try {
+      return Array.from(root.querySelectorAll(selector));
+    } catch {
+      return [];
+    }
+  }
+  function textOf(root, selector) {
+    return String(query(root, selector)?.textContent || "").replace(/\s+/g, " ").trim();
+  }
+  function labelFrom(element) {
+    if (!element) return "";
+    const text = String(element.textContent || "").replace(/\s+/g, " ").trim();
+    if (text) return text;
+    return String(element.getAttribute("title") || element.getAttribute("aria-label") || element.getAttribute("alt") || "").replace(/\s+/g, " ").trim();
+  }
+  function labelOf(root, selector) {
+    return labelFrom(query(root, selector));
+  }
+  function labelOfBest(root, selector) {
+    if (!selector) return "";
+    try {
+      if (root instanceof Element && root.matches(selector)) {
+        const own = labelFrom(root);
+        if (own) return own;
+      }
+    } catch {
+    }
+    for (const el of queryAll(root, selector)) {
+      const label = labelFrom(el);
+      if (label) return label;
+    }
+    return "";
+  }
+  function queryOwned(row, selector, rowSelector, maxDepth = 6) {
+    if (!selector) return null;
+    const inRow = selfOrQuery(row, selector);
+    if (inRow) return inRow;
+    let ancestor = row.parentElement;
+    for (let depth = 0; ancestor && depth < maxDepth; depth += 1, ancestor = ancestor.parentElement) {
+      try {
+        if (ancestor.matches(selector)) return ancestor;
+      } catch {
+      }
+      const owned = queryAll(ancestor, selector).filter((candidate) => {
+        try {
+          const ownerRow = candidate.closest(rowSelector);
+          return !ownerRow || ownerRow === row;
+        } catch {
+          return true;
+        }
+      });
+      if (owned.length === 1) return owned[0];
+      if (owned.length > 1) return null;
+    }
+    return null;
+  }
+  function retailerMoneyAmounts(value) {
+    const normalized = String(value || "").replace(/\s+/g, " ");
+    const tagged = [
+      ...normalized.matchAll(/(\d{1,3}(?:[.,]\d{3})+|\d{4,})\s*(?:đ|₫|vnd|usd)\b/gi),
+      ...normalized.matchAll(/(?:vnd|usd|₫|đ)\s*(\d{1,3}(?:[.,]\d{3})+|\d+(?:[.,]\d{2})?)/gi)
+    ].map((match) => Number(String(match[1]).replace(/[^0-9]/g, ""))).filter((amount2) => Number.isFinite(amount2) && amount2 > 0);
+    if (tagged.length) return tagged;
+    const strippedPct = normalized.replace(/\d+(?:[.,]\d+)?\s*%/g, " ");
+    const grouped = strippedPct.match(/\d{1,3}(?:[.,]\d{3})+/);
+    const token = grouped?.[0] || strippedPct.match(/\d{4,}/)?.[0];
+    if (!token) return [];
+    const amount = Number(token.replace(/[^0-9]/g, ""));
+    return Number.isFinite(amount) && amount > 0 ? [amount] : [];
+  }
+  function parseRetailerMoney(value, pick = "first") {
+    const amounts = retailerMoneyAmounts(value);
+    if (!amounts.length) return void 0;
+    if (pick === "min") return Math.min(...amounts);
+    if (pick === "max") return Math.max(...amounts);
+    return amounts[0];
+  }
+  function selectedControlOf(row, config) {
+    const selector = config.selectedSelector;
+    if (!selector) return null;
+    const inRow = query(row, selector);
+    if (inRow) return inRow;
+    let sibling = row.previousElementSibling;
+    while (sibling) {
+      try {
+        if (sibling.matches(selector)) return sibling;
+      } catch {
+      }
+      const found = query(sibling, selector);
+      if (found) return found;
+      sibling = sibling.previousElementSibling;
+    }
+    return null;
+  }
+  function readCartLineSelection(scope, productLinks) {
+    let row = scope;
+    for (let depth = 0; row && row !== document.body && depth < 6; depth += 1, row = row.parentElement) {
+      const currentRow = row;
+      const products = new Set(productLinks.filter((link) => currentRow.contains(link)).map((link) => new URL(link.href).pathname.replace(/\/+$/, "")));
+      if (products.size !== 1) return null;
+      const inputs = row.querySelectorAll("input[type='checkbox']");
+      if (inputs.length) return inputs.length === 1 ? inputs[0].checked : null;
+      const controls = row.querySelectorAll("[role='checkbox'][aria-checked]");
+      if (controls.length) {
+        const state = controls[0].getAttribute("aria-checked");
+        return controls.length === 1 && (state === "true" || state === "false") ? state === "true" : null;
+      }
+    }
+    return null;
+  }
+  function isSelected(row, config) {
+    if (!config.selectedSelector) return true;
+    const control = selectedControlOf(row, config);
+    if (!control) return false;
+    const attribute = config.selectedAttribute || "aria-checked";
+    if (control instanceof HTMLInputElement && control.type === "checkbox") {
+      return control.checked || control.getAttribute(attribute) === "true";
+    }
+    return control.getAttribute(attribute) === "true";
+  }
+  function hasQuantityControl(row, selector) {
+    if (!selector) return false;
+    return Boolean(selfOrQuery(row, selector));
+  }
+  function rowHasProductName(row, config) {
+    const named = selfOrQuery(row, config.nameSelector) || query(row, config.urlSelector);
+    if (!named) return false;
+    if (labelFrom(named)) return true;
+    return named instanceof window.HTMLAnchorElement && Boolean(named.getAttribute("href"));
+  }
+  function innermost(rows) {
+    return rows.filter((row) => !rows.some((other) => other !== row && row.contains(other)));
+  }
+  function selectLiveCartRows(config) {
+    const all = queryAll(document, config.rowSelector);
+    if (all.length <= 1) return all;
+    const withQty = config.quantitySelector ? all.filter((row) => hasQuantityControl(row, config.quantitySelector)) : all;
+    const pool = withQty.length ? withQty : all;
+    const named = pool.filter((row) => rowHasProductName(row, config));
+    return innermost(named.length ? named : pool);
+  }
+  function quantityOf(row, selector) {
+    if (!selector) return 1;
+    const input = selfOrQuery(row, selector);
+    if (!input) return 1;
+    const raw = input instanceof HTMLInputElement ? input.value || input.getAttribute("aria-valuenow") : input.getAttribute("aria-valuenow") || input.textContent;
+    const direct = Number.parseInt(String(raw || "").trim(), 10);
+    if (Number.isInteger(direct) && direct >= 0) return direct;
+    const match = String(raw || "").match(/(\d{1,4})/);
+    return Math.max(0, Number.parseInt(match?.[1] || "0", 10) || 0);
+  }
+  function absoluteUrl(value) {
+    if (!value) return void 0;
+    try {
+      return new URL(value, location.href).toString();
+    } catch {
+      return void 0;
+    }
+  }
+  function firstSrcsetUrl(value) {
+    const first = String(value || "").split(",")[0] || "";
+    return first.trim().split(/\s+/)[0] || "";
+  }
+  function isPlaceholderImageUrl(url) {
+    const lower = url.toLowerCase();
+    if (!url || url === location.href) return true;
+    if (lower.startsWith("data:")) return true;
+    if (/\/(?:blank|spacer|placeholder|transparent)\.(?:gif|png|svg|webp)/i.test(url)) return true;
+    return false;
+  }
+  function isDecorativeImage(img, url) {
+    const hay = [
+      url,
+      img.getAttribute("alt") || "",
+      img.getAttribute("class") || "",
+      img.getAttribute("title") || ""
+    ].join(" ").toLowerCase();
+    if (/guarant|badge|logo|icon|sprite|flag|trade.?assurance|watermark/.test(hay)) return true;
+    const width = Number(img.getAttribute("width") || img.width || 0);
+    const height = Number(img.getAttribute("height") || img.height || 0);
+    if (width > 0 && width < 32 || height > 0 && height < 32) return true;
+    return false;
+  }
+  function imageUrlFrom(img) {
+    const candidates = [
+      img.currentSrc,
+      img.getAttribute("src"),
+      img.src,
+      img.getAttribute("data-src"),
+      img.getAttribute("data-original"),
+      img.getAttribute("data-lazy-src"),
+      img.getAttribute("data-lazy"),
+      firstSrcsetUrl(img.getAttribute("srcset") || ""),
+      firstSrcsetUrl(img.getAttribute("data-srcset") || "")
+    ];
+    for (const candidate of candidates) {
+      const url = absoluteUrl(String(candidate || "").trim());
+      if (url && !isPlaceholderImageUrl(url)) return url;
+    }
+    return void 0;
+  }
+  function imageOf(row, selector) {
+    const ImageType = window.HTMLImageElement;
+    const pick = (root) => {
+      const nodes = selector ? queryAll(root, selector) : queryAll(root, "img");
+      if (root instanceof Element && selector) {
+        try {
+          if (root.matches(selector) && root instanceof ImageType) nodes.unshift(root);
+        } catch {
+        }
+      }
+      let best;
+      for (const node of nodes) {
+        const img = node instanceof ImageType ? node : query(node, "img");
+        if (!(img instanceof ImageType)) continue;
+        const url = imageUrlFrom(img);
+        if (!url || isDecorativeImage(img, url)) continue;
+        const width = Number(img.getAttribute("width") || img.width || 80);
+        const height = Number(img.getAttribute("height") || img.height || 80);
+        const score = Math.max(width, 1) * Math.max(height, 1);
+        if (!best || score > best.score) best = { url, score };
+      }
+      return best?.url;
+    };
+    const fromRow = pick(row);
+    if (fromRow) return fromRow;
+    let parent = row.parentElement;
+    for (let depth = 0; parent && depth < 4; depth += 1, parent = parent.parentElement) {
+      const fromParent = pick(parent);
+      if (fromParent) return fromParent;
+    }
+    return void 0;
+  }
+  function readRetailerLiveCart(sessionId, config) {
+    if (!sessionId || !hrefMatches(config)) return null;
+    const items = selectLiveCartRows(config).filter((row) => isSelected(row, config)).map((row) => {
+      const link = queryOwned(row, config.urlSelector, config.rowSelector);
+      const named = queryOwned(row, config.nameSelector, config.rowSelector);
+      const name = labelOfBest(row, config.nameSelector) || labelFrom(named) || labelOf(row, config.nameSelector);
+      const qty = quantityOf(row, config.quantitySelector);
+      return {
+        name,
+        qty,
+        unitPrice: parseRetailerMoney(textOf(row, config.unitPriceSelector), "min"),
+        lineTotal: parseRetailerMoney(textOf(row, config.lineTotalSelector), "max"),
+        image: imageOf(row, config.imageSelector),
+        url: link instanceof window.HTMLAnchorElement ? absoluteUrl(link.href) : absoluteUrl(link?.getAttribute("href") || "")
+      };
+    }).filter((item) => item.name && item.qty > 0);
+    return {
+      sessionId,
+      items,
+      total: items.reduce((sum, item) => sum + (item.lineTotal || (item.unitPrice || 0) * item.qty), 0),
+      source: config.source || "retailer-cart-dom"
+    };
+  }
+  function flush() {
+    timer3 = null;
+    if (!activeConfig || !publishSnapshot) return;
+    const snapshot = readRetailerLiveCart(activeSessionId, activeConfig);
+    if (!snapshot) return;
+    if (!snapshot.items.length) {
+      if (!hasPublishedSelection) return;
+      if (!activeConfig.selectedSelector) return;
+    }
+    const fingerprint = JSON.stringify(snapshot);
+    if (fingerprint === lastFingerprint) return;
+    lastFingerprint = fingerprint;
+    if (snapshot.items.length) hasPublishedSelection = true;
+    publishSnapshot(snapshot);
+  }
+  function refreshRetailerLiveCart(delayMs = 120) {
+    if (timer3 != null) window.clearTimeout(timer3);
+    timer3 = window.setTimeout(flush, delayMs);
+  }
+  function onRetailerCartInteraction() {
+    if (!activeConfig || !hrefMatches(activeConfig)) return;
+    refreshRetailerLiveCart(80);
+  }
+  function attachEventListeners() {
+    if (eventListenersAttached) return;
+    eventListenersAttached = true;
+    document.addEventListener("click", onRetailerCartInteraction, true);
+    document.addEventListener("change", onRetailerCartInteraction, true);
+    document.addEventListener("input", onRetailerCartInteraction, true);
+  }
+  function detachEventListeners() {
+    if (!eventListenersAttached) return;
+    eventListenersAttached = false;
+    document.removeEventListener("click", onRetailerCartInteraction, true);
+    document.removeEventListener("change", onRetailerCartInteraction, true);
+    document.removeEventListener("input", onRetailerCartInteraction, true);
+  }
+  function configureRetailerLiveCart(sessionId, config, publisher) {
+    const sessionChanged = Boolean(activeSessionId && activeSessionId !== sessionId);
+    activeSessionId = sessionId;
+    activeConfig = config || null;
+    publishSnapshot = publisher;
+    lastFingerprint = "";
+    if (sessionChanged) hasPublishedSelection = false;
+    observer?.disconnect();
+    observer = null;
+    if (pollTimer != null) window.clearInterval(pollTimer);
+    pollTimer = null;
+    detachEventListeners();
+    if (!activeConfig) {
+      hasPublishedSelection = false;
+      return;
+    }
+    attachEventListeners();
+    observer = new MutationObserver(() => refreshRetailerLiveCart());
+    observer.observe(document.documentElement, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: [activeConfig.selectedAttribute || "aria-checked", "value", "checked"]
+    });
+    pollTimer = window.setInterval(() => refreshRetailerLiveCart(0), 1200);
+    refreshRetailerLiveCart(0);
+  }
+  function resetRetailerLiveCart(sessionId) {
+    if (sessionId && activeSessionId && sessionId !== activeSessionId) return;
+    observer?.disconnect();
+    observer = null;
+    if (timer3 != null) window.clearTimeout(timer3);
+    timer3 = null;
+    if (pollTimer != null) window.clearInterval(pollTimer);
+    pollTimer = null;
+    activeSessionId = "";
+    activeConfig = null;
+    publishSnapshot = null;
+    lastFingerprint = "";
+    hasPublishedSelection = false;
+    detachEventListeners();
+  }
+
   // src/content/coop-live-cart.ts
   function visible5(element) {
     if (!(element instanceof HTMLElement)) return false;
@@ -4719,6 +5112,7 @@ ${guideHighlightCss({
     const anchors = [...document.querySelectorAll("a[href*='--s']")].filter(visible5);
     const seen = /* @__PURE__ */ new Set();
     const items = [];
+    let hasDeselectedItems = false;
     for (const anchor of anchors) {
       const sku = productSku(anchor.href);
       const path = normalizePath(anchor.href);
@@ -4727,10 +5121,14 @@ ${guideHighlightCss({
       const scope = findProductScope(anchor);
       const quantity = parseQuantity(scope);
       if (!Number.isInteger(quantity) || !quantity || quantity <= 0) continue;
+      seen.add(key);
+      if (readCartLineSelection(scope, anchors) === false) {
+        hasDeselectedItems = true;
+        continue;
+      }
       const name = cartName(anchor, scope);
       const image = scope.querySelector("img[src]");
       const lineTotal = parseMoney(scope.textContent || "");
-      seen.add(key);
       items.push({
         sku,
         name,
@@ -4742,7 +5140,7 @@ ${guideHighlightCss({
         url: anchor.href
       });
     }
-    if (!items.length) return null;
+    if (!seen.size) return null;
     const totalCandidates = [...document.querySelectorAll("body *")].filter((element) => {
       const text = comparableText(element.textContent || "");
       return element.children.length <= 3 && /^(thanh tien|tong tam tinh|tong cong)/.test(text);
@@ -4750,7 +5148,7 @@ ${guideHighlightCss({
     const itemTotal = items.reduce((sum, item) => sum + (item.lineTotal || 0), 0);
     return {
       items,
-      total: Math.max(itemTotal, ...totalCandidates, 0),
+      total: hasDeselectedItems ? itemTotal : Math.max(itemTotal, ...totalCandidates, 0),
       currency: "VND",
       source: "cart-dom",
       pageUrl: location.href,
@@ -4866,7 +5264,7 @@ ${guideHighlightCss({
 #${NOTE_ID3} { display: none; }
 `;
   var enabled3 = false;
-  var timer3 = null;
+  var timer4 = null;
   var phase = "idle";
   var membershipStepDone = false;
   var lastBubbleKey2 = "";
@@ -5212,17 +5610,17 @@ ${guideHighlightCss({
     ensureStyles4();
     installGhostGuard();
     window.addEventListener("scroll", onGuideScroll4, true);
-    if (timer3 !== null) return;
+    if (timer4 !== null) return;
     cartGuideStartedAt = 0;
     lastBubbleKey2 = "";
-    timer3 = window.setInterval(() => tickWithGrace(), POLL_MS2);
+    timer4 = window.setInterval(() => tickWithGrace(), POLL_MS2);
     window.setTimeout(() => tickWithGrace(), 150);
   }
   function stopCoopCartGuide() {
     enabled3 = false;
-    if (timer3 !== null) {
-      window.clearInterval(timer3);
-      timer3 = null;
+    if (timer4 !== null) {
+      window.clearInterval(timer4);
+      timer4 = null;
     }
     clearDecorations();
     window.removeEventListener("scroll", onGuideScroll4, true);
@@ -5262,360 +5660,110 @@ ${guideHighlightCss({
     return /quảng cáo|địa chỉ|cửa hàng gần nhất|coop-location|coop-ad|handle-address-popup/.test(normalized);
   }
 
-  // src/content/retailer-live-cart.ts
-  var activeSessionId = "";
-  var activeConfig = null;
-  var publishSnapshot = null;
-  var observer = null;
-  var timer4 = null;
-  var pollTimer = null;
-  var lastFingerprint = "";
-  var hasPublishedSelection = false;
-  var eventListenersAttached = false;
-  function hrefMatches(config) {
-    const needles = Array.isArray(config.urlIncludes) ? config.urlIncludes : [config.urlIncludes];
-    return needles.some((needle) => Boolean(needle) && location.href.includes(needle));
+  // src/content/media-popup.ts
+  var ACTIVE_ATTR = "data-zapee-media-popup-active";
+  var TARGET_ATTR = "data-zapee-media-popup-target";
+  var activeSessionId2 = "";
+  var activeConfig2 = null;
+  var observer2 = null;
+  var timer5 = null;
+  var pollTimer2 = null;
+  var markedLayer = null;
+  var markedTarget = null;
+  function visible7(el) {
+    if (!(el instanceof HTMLElement) || !el.isConnected) return false;
+    const rect = el.getBoundingClientRect();
+    const style = getComputedStyle(el);
+    return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden" && Number(style.opacity) !== 0 && rect.right > 0 && rect.bottom > 0 && rect.left < window.innerWidth && rect.top < window.innerHeight;
   }
-  function selfOrQuery(root, selector) {
-    if (!selector) return root;
+  function area(el) {
+    const rect = el.getBoundingClientRect();
+    return rect.width * rect.height;
+  }
+  function findPopup(config) {
+    const layers = Array.from(document.querySelectorAll(config.overlaySelector)).filter(visible7);
+    const layer = document.elementsFromPoint(window.innerWidth / 2, window.innerHeight / 2).find((el) => layers.includes(el));
+    if (!layer) return null;
+    const rect = layer.getBoundingClientRect();
+    if (rect.width < window.innerWidth * 0.7 || rect.height < window.innerHeight * 0.7) return null;
+    if (config.excludeSelector && (layer.matches(config.excludeSelector) || layer.querySelector(config.excludeSelector))) return null;
+    const text = layer.innerText.replace(/\s+/g, " ").toLocaleLowerCase();
+    if (config.excludeText?.some((phrase) => phrase.trim() && text.includes(phrase.trim().toLocaleLowerCase()))) return null;
+    const media = [layer, ...Array.from(layer.querySelectorAll(config.mediaSelector))].filter((el) => {
+      if (!el.matches(config.mediaSelector) || !visible7(el)) return false;
+      const rect2 = el.getBoundingClientRect();
+      if (rect2.width < 160 || rect2.height < 100) return false;
+      return el instanceof HTMLImageElement || el instanceof HTMLVideoElement || getComputedStyle(el).backgroundImage !== "none";
+    }).sort((a, b) => area(b) - area(a))[0];
+    if (!media) return null;
+    let target = media;
+    while (target.parentElement && target.parentElement !== layer) {
+      const parent = target.parentElement;
+      if (!visible7(parent) || area(parent) > area(media) * 1.5) break;
+      target = parent;
+    }
+    return { layer, target };
+  }
+  function refreshMediaPopup() {
+    if (!activeSessionId2 || !activeConfig2) return;
+    let popup = null;
     try {
-      if (root.matches(selector)) return root;
+      popup = findPopup(activeConfig2);
     } catch {
     }
-    return query(root, selector);
-  }
-  function query(root, selector) {
-    if (!selector) return null;
-    try {
-      return root.querySelector(selector);
-    } catch {
-      return null;
+    if (markedTarget !== popup?.target) {
+      markedTarget?.removeAttribute(TARGET_ATTR);
+      markedTarget = popup?.target || null;
+      markedTarget?.setAttribute(TARGET_ATTR, "true");
+    }
+    if (markedLayer !== popup?.layer) {
+      markedLayer?.removeAttribute(ACTIVE_ATTR);
+      markedLayer = popup?.layer || null;
+      markedLayer?.setAttribute(ACTIVE_ATTR, "true");
     }
   }
-  function queryAll(root, selector) {
-    try {
-      return Array.from(root.querySelectorAll(selector));
-    } catch {
-      return [];
-    }
+  function scheduleRefresh() {
+    if (timer5 !== null) return;
+    timer5 = window.setTimeout(() => {
+      timer5 = null;
+      refreshMediaPopup();
+    }, 80);
   }
-  function textOf(root, selector) {
-    return String(query(root, selector)?.textContent || "").replace(/\s+/g, " ").trim();
+  function resetMediaPopup(sessionId) {
+    if (sessionId && activeSessionId2 && sessionId !== activeSessionId2) return;
+    observer2?.disconnect();
+    observer2 = null;
+    if (timer5 !== null) window.clearTimeout(timer5);
+    if (pollTimer2 !== null) window.clearInterval(pollTimer2);
+    timer5 = null;
+    pollTimer2 = null;
+    markedTarget?.removeAttribute(TARGET_ATTR);
+    markedLayer?.removeAttribute(ACTIVE_ATTR);
+    markedTarget = null;
+    markedLayer = null;
+    activeSessionId2 = "";
+    activeConfig2 = null;
   }
-  function labelFrom(element) {
-    if (!element) return "";
-    const text = String(element.textContent || "").replace(/\s+/g, " ").trim();
-    if (text) return text;
-    return String(element.getAttribute("title") || element.getAttribute("aria-label") || element.getAttribute("alt") || "").replace(/\s+/g, " ").trim();
-  }
-  function labelOf(root, selector) {
-    return labelFrom(query(root, selector));
-  }
-  function labelOfBest(root, selector) {
-    if (!selector) return "";
-    try {
-      if (root instanceof Element && root.matches(selector)) {
-        const own = labelFrom(root);
-        if (own) return own;
-      }
-    } catch {
-    }
-    for (const el of queryAll(root, selector)) {
-      const label = labelFrom(el);
-      if (label) return label;
-    }
-    return "";
-  }
-  function queryOwned(row, selector, rowSelector, maxDepth = 6) {
-    if (!selector) return null;
-    const inRow = selfOrQuery(row, selector);
-    if (inRow) return inRow;
-    let ancestor = row.parentElement;
-    for (let depth = 0; ancestor && depth < maxDepth; depth += 1, ancestor = ancestor.parentElement) {
-      try {
-        if (ancestor.matches(selector)) return ancestor;
-      } catch {
-      }
-      const owned = queryAll(ancestor, selector).filter((candidate) => {
-        try {
-          const ownerRow = candidate.closest(rowSelector);
-          return !ownerRow || ownerRow === row;
-        } catch {
-          return true;
-        }
-      });
-      if (owned.length === 1) return owned[0];
-      if (owned.length > 1) return null;
-    }
-    return null;
-  }
-  function retailerMoneyAmounts(value) {
-    const normalized = String(value || "").replace(/\s+/g, " ");
-    const tagged = [
-      ...normalized.matchAll(/(\d{1,3}(?:[.,]\d{3})+|\d{4,})\s*(?:đ|₫|vnd|usd)\b/gi),
-      ...normalized.matchAll(/(?:vnd|usd|₫|đ)\s*(\d{1,3}(?:[.,]\d{3})+|\d+(?:[.,]\d{2})?)/gi)
-    ].map((match) => Number(String(match[1]).replace(/[^0-9]/g, ""))).filter((amount2) => Number.isFinite(amount2) && amount2 > 0);
-    if (tagged.length) return tagged;
-    const strippedPct = normalized.replace(/\d+(?:[.,]\d+)?\s*%/g, " ");
-    const grouped = strippedPct.match(/\d{1,3}(?:[.,]\d{3})+/);
-    const token = grouped?.[0] || strippedPct.match(/\d{4,}/)?.[0];
-    if (!token) return [];
-    const amount = Number(token.replace(/[^0-9]/g, ""));
-    return Number.isFinite(amount) && amount > 0 ? [amount] : [];
-  }
-  function parseRetailerMoney(value, pick = "first") {
-    const amounts = retailerMoneyAmounts(value);
-    if (!amounts.length) return void 0;
-    if (pick === "min") return Math.min(...amounts);
-    if (pick === "max") return Math.max(...amounts);
-    return amounts[0];
-  }
-  function selectedControlOf(row, config) {
-    const selector = config.selectedSelector;
-    if (!selector) return null;
-    const inRow = query(row, selector);
-    if (inRow) return inRow;
-    let sibling = row.previousElementSibling;
-    while (sibling) {
-      try {
-        if (sibling.matches(selector)) return sibling;
-      } catch {
-      }
-      const found = query(sibling, selector);
-      if (found) return found;
-      sibling = sibling.previousElementSibling;
-    }
-    return null;
-  }
-  function isSelected(row, config) {
-    if (!config.selectedSelector) return true;
-    const control = selectedControlOf(row, config);
-    if (!control) return false;
-    const attribute = config.selectedAttribute || "aria-checked";
-    if (control instanceof HTMLInputElement && control.type === "checkbox") {
-      return control.checked || control.getAttribute(attribute) === "true";
-    }
-    return control.getAttribute(attribute) === "true";
-  }
-  function hasQuantityControl(row, selector) {
-    if (!selector) return false;
-    return Boolean(selfOrQuery(row, selector));
-  }
-  function rowHasProductName(row, config) {
-    const named = selfOrQuery(row, config.nameSelector) || query(row, config.urlSelector);
-    if (!named) return false;
-    if (labelFrom(named)) return true;
-    return named instanceof window.HTMLAnchorElement && Boolean(named.getAttribute("href"));
-  }
-  function innermost(rows) {
-    return rows.filter((row) => !rows.some((other) => other !== row && row.contains(other)));
-  }
-  function selectLiveCartRows(config) {
-    const all = queryAll(document, config.rowSelector);
-    if (all.length <= 1) return all;
-    const withQty = config.quantitySelector ? all.filter((row) => hasQuantityControl(row, config.quantitySelector)) : all;
-    const pool = withQty.length ? withQty : all;
-    const named = pool.filter((row) => rowHasProductName(row, config));
-    return innermost(named.length ? named : pool);
-  }
-  function quantityOf(row, selector) {
-    if (!selector) return 1;
-    const input = selfOrQuery(row, selector);
-    if (!input) return 1;
-    const raw = input instanceof HTMLInputElement ? input.value || input.getAttribute("aria-valuenow") : input.getAttribute("aria-valuenow") || input.textContent;
-    const direct = Number.parseInt(String(raw || "").trim(), 10);
-    if (Number.isInteger(direct) && direct >= 0) return direct;
-    const match = String(raw || "").match(/(\d{1,4})/);
-    return Math.max(0, Number.parseInt(match?.[1] || "0", 10) || 0);
-  }
-  function absoluteUrl(value) {
-    if (!value) return void 0;
-    try {
-      return new URL(value, location.href).toString();
-    } catch {
-      return void 0;
-    }
-  }
-  function firstSrcsetUrl(value) {
-    const first = String(value || "").split(",")[0] || "";
-    return first.trim().split(/\s+/)[0] || "";
-  }
-  function isPlaceholderImageUrl(url) {
-    const lower = url.toLowerCase();
-    if (!url || url === location.href) return true;
-    if (lower.startsWith("data:")) return true;
-    if (/\/(?:blank|spacer|placeholder|transparent)\.(?:gif|png|svg|webp)/i.test(url)) return true;
-    return false;
-  }
-  function isDecorativeImage(img, url) {
-    const hay = [
-      url,
-      img.getAttribute("alt") || "",
-      img.getAttribute("class") || "",
-      img.getAttribute("title") || ""
-    ].join(" ").toLowerCase();
-    if (/guarant|badge|logo|icon|sprite|flag|trade.?assurance|watermark/.test(hay)) return true;
-    const width = Number(img.getAttribute("width") || img.width || 0);
-    const height = Number(img.getAttribute("height") || img.height || 0);
-    if (width > 0 && width < 32 || height > 0 && height < 32) return true;
-    return false;
-  }
-  function imageUrlFrom(img) {
-    const candidates = [
-      img.currentSrc,
-      img.getAttribute("src"),
-      img.src,
-      img.getAttribute("data-src"),
-      img.getAttribute("data-original"),
-      img.getAttribute("data-lazy-src"),
-      img.getAttribute("data-lazy"),
-      firstSrcsetUrl(img.getAttribute("srcset") || ""),
-      firstSrcsetUrl(img.getAttribute("data-srcset") || "")
-    ];
-    for (const candidate of candidates) {
-      const url = absoluteUrl(String(candidate || "").trim());
-      if (url && !isPlaceholderImageUrl(url)) return url;
-    }
-    return void 0;
-  }
-  function imageOf(row, selector) {
-    const ImageType = window.HTMLImageElement;
-    const pick = (root) => {
-      const nodes = selector ? queryAll(root, selector) : queryAll(root, "img");
-      if (root instanceof Element && selector) {
-        try {
-          if (root.matches(selector) && root instanceof ImageType) nodes.unshift(root);
-        } catch {
-        }
-      }
-      let best;
-      for (const node of nodes) {
-        const img = node instanceof ImageType ? node : query(node, "img");
-        if (!(img instanceof ImageType)) continue;
-        const url = imageUrlFrom(img);
-        if (!url || isDecorativeImage(img, url)) continue;
-        const width = Number(img.getAttribute("width") || img.width || 80);
-        const height = Number(img.getAttribute("height") || img.height || 80);
-        const score = Math.max(width, 1) * Math.max(height, 1);
-        if (!best || score > best.score) best = { url, score };
-      }
-      return best?.url;
-    };
-    const fromRow = pick(row);
-    if (fromRow) return fromRow;
-    let parent = row.parentElement;
-    for (let depth = 0; parent && depth < 4; depth += 1, parent = parent.parentElement) {
-      const fromParent = pick(parent);
-      if (fromParent) return fromParent;
-    }
-    return void 0;
-  }
-  function readRetailerLiveCart(sessionId, config) {
-    if (!sessionId || !hrefMatches(config)) return null;
-    const items = selectLiveCartRows(config).filter((row) => isSelected(row, config)).map((row) => {
-      const link = queryOwned(row, config.urlSelector, config.rowSelector);
-      const named = queryOwned(row, config.nameSelector, config.rowSelector);
-      const name = labelOfBest(row, config.nameSelector) || labelFrom(named) || labelOf(row, config.nameSelector);
-      const qty = quantityOf(row, config.quantitySelector);
-      return {
-        name,
-        qty,
-        unitPrice: parseRetailerMoney(textOf(row, config.unitPriceSelector), "min"),
-        lineTotal: parseRetailerMoney(textOf(row, config.lineTotalSelector), "max"),
-        image: imageOf(row, config.imageSelector),
-        url: link instanceof window.HTMLAnchorElement ? absoluteUrl(link.href) : absoluteUrl(link?.getAttribute("href") || "")
-      };
-    }).filter((item) => item.name && item.qty > 0);
-    return {
-      sessionId,
-      items,
-      total: items.reduce((sum, item) => sum + (item.lineTotal || (item.unitPrice || 0) * item.qty), 0),
-      source: config.source || "retailer-cart-dom"
-    };
-  }
-  function flush() {
-    timer4 = null;
-    if (!activeConfig || !publishSnapshot) return;
-    const snapshot = readRetailerLiveCart(activeSessionId, activeConfig);
-    if (!snapshot) return;
-    if (!snapshot.items.length) {
-      if (!hasPublishedSelection) return;
-      if (!activeConfig.selectedSelector) return;
-    }
-    const fingerprint = JSON.stringify(snapshot);
-    if (fingerprint === lastFingerprint) return;
-    lastFingerprint = fingerprint;
-    if (snapshot.items.length) hasPublishedSelection = true;
-    publishSnapshot(snapshot);
-  }
-  function refreshRetailerLiveCart(delayMs = 120) {
-    if (timer4 != null) window.clearTimeout(timer4);
-    timer4 = window.setTimeout(flush, delayMs);
-  }
-  function onRetailerCartInteraction() {
-    if (!activeConfig || !hrefMatches(activeConfig)) return;
-    refreshRetailerLiveCart(80);
-  }
-  function attachEventListeners() {
-    if (eventListenersAttached) return;
-    eventListenersAttached = true;
-    document.addEventListener("click", onRetailerCartInteraction, true);
-    document.addEventListener("change", onRetailerCartInteraction, true);
-    document.addEventListener("input", onRetailerCartInteraction, true);
-  }
-  function detachEventListeners() {
-    if (!eventListenersAttached) return;
-    eventListenersAttached = false;
-    document.removeEventListener("click", onRetailerCartInteraction, true);
-    document.removeEventListener("change", onRetailerCartInteraction, true);
-    document.removeEventListener("input", onRetailerCartInteraction, true);
-  }
-  function configureRetailerLiveCart(sessionId, config, publisher) {
-    const sessionChanged = Boolean(activeSessionId && activeSessionId !== sessionId);
-    activeSessionId = sessionId;
-    activeConfig = config || null;
-    publishSnapshot = publisher;
-    lastFingerprint = "";
-    if (sessionChanged) hasPublishedSelection = false;
-    observer?.disconnect();
-    observer = null;
-    if (pollTimer != null) window.clearInterval(pollTimer);
-    pollTimer = null;
-    detachEventListeners();
-    if (!activeConfig) {
-      hasPublishedSelection = false;
-      return;
-    }
-    attachEventListeners();
-    observer = new MutationObserver(() => refreshRetailerLiveCart());
-    observer.observe(document.documentElement, {
+  function configureMediaPopup(sessionId, config) {
+    resetMediaPopup();
+    if (!sessionId || !config?.overlaySelector || !config.mediaSelector || !config.excludeSelector) return;
+    activeSessionId2 = sessionId;
+    activeConfig2 = config;
+    refreshMediaPopup();
+    observer2 = new MutationObserver(scheduleRefresh);
+    observer2.observe(document.documentElement, {
       subtree: true,
       childList: true,
       attributes: true,
-      attributeFilter: [activeConfig.selectedAttribute || "aria-checked", "value", "checked"]
+      // Our own marker changes do not trigger another observer pass.
+      attributeFilter: ["class", "style", "hidden", "aria-hidden", "src"]
     });
-    pollTimer = window.setInterval(() => refreshRetailerLiveCart(0), 1200);
-    refreshRetailerLiveCart(0);
-  }
-  function resetRetailerLiveCart(sessionId) {
-    if (sessionId && activeSessionId && sessionId !== activeSessionId) return;
-    observer?.disconnect();
-    observer = null;
-    if (timer4 != null) window.clearTimeout(timer4);
-    timer4 = null;
-    if (pollTimer != null) window.clearInterval(pollTimer);
-    pollTimer = null;
-    activeSessionId = "";
-    activeConfig = null;
-    publishSnapshot = null;
-    lastFingerprint = "";
-    hasPublishedSelection = false;
-    detachEventListeners();
+    pollTimer2 = window.setInterval(refreshMediaPopup, 400);
   }
 
   // src/content/coop-flow-guard.ts
   function shouldBlockCoopPreAccountNavigation(state) {
-    if (!state.hasActiveOrderSession || state.authenticated || state.locationReady && state.adDismissed) return false;
+    if (!state.hasActiveOrderSession || state.authenticated || state.locationReady) return false;
     let url;
     try {
       url = new URL(state.targetUrl, "https://cooponline.vn/");
@@ -6013,7 +6161,7 @@ ${guideHighlightCss({
     if (!isCoopHost()) return;
     if (!/\/(cart|checkout)/i.test(location.pathname)) return;
     const snap = readCoopLiveCart();
-    if (!snap?.items.length) return;
+    if (!snap) return;
     const sessionId = currentOrderSessionId();
     if (!sessionId) return;
     const key = JSON.stringify({
@@ -6041,6 +6189,7 @@ ${guideHighlightCss({
     }, 450);
   }
   function onLiveCartUserEvent() {
+    maybeSyncLiveCart();
     scheduleLiveCartSync("user");
   }
   function startLiveCartPolling() {
@@ -6109,7 +6258,7 @@ ${guideHighlightCss({
     clearCoopAccountNavigationFallback();
     coopAccountNavigationFallbackTimer = window.setTimeout(() => {
       coopAccountNavigationFallbackTimer = null;
-      if (!currentOrderSessionId() || isAuthenticatedForActiveSession() || !wasAdDismissedForActiveSession() || !isLocationReadyForActiveSession() || isCoopAccountOrAuthPath() || isCheckoutReachedForActiveSession() || /\/(?:cart|checkout)(?:\/|$)|--s\d+/i.test(location.pathname)) return;
+      if (!currentOrderSessionId() || isAuthenticatedForActiveSession() || !isLocationReadyForActiveSession() || isCoopAccountOrAuthPath() || isCheckoutReachedForActiveSession() || /\/(?:cart|checkout)(?:\/|$)|--s\d+/i.test(location.pathname)) return;
       markAccountNavDone();
       location.assign("https://cooponline.vn/account");
     }, 1800);
@@ -6143,8 +6292,6 @@ ${guideHighlightCss({
     if (document.documentElement.dataset.zapeeCoopAuthenticated === "true") {
       return true;
     }
-    const adDone = wasAdDismissedForActiveSession() || document.documentElement.dataset.zapeeCoopAdDismissed === "true";
-    if (!adDone) return false;
     return isLocationReadyForActiveSession() || hasMatchingCoopLocationStorage() || document.documentElement.dataset.zapeeCoopLocationReady === "true";
   }
   function settleCoopPreAccountFlow() {
@@ -6179,7 +6326,7 @@ ${guideHighlightCss({
       if (sessionId) writeSessionValue(LOCATION_READY_SESSION_KEY, sessionId);
       document.documentElement.dataset.zapeeCoopLocationReady = "true";
       coopLocationFlowStarted = true;
-      armCoopAdAfterLocation();
+      continueCoopAfterLocation();
       return;
     }
     if (coopLocationFlowStarted || !pendingCoopLocationPayload) return;
@@ -6188,37 +6335,9 @@ ${guideHighlightCss({
     showGuidance({ checkpointId: "coop-location", message });
     applyCoopLocationSeed(pendingCoopLocationPayload);
   }
-  function onCoopAdVisible(message) {
-    if (isAuthenticatedForActiveSession() || isCoopAccountAuthenticated()) {
-      delete document.documentElement.dataset.zapeeCoopAdVisible;
-      return;
-    }
-    if (wasAdDismissedForActiveSession()) {
-      delete document.documentElement.dataset.zapeeCoopAdVisible;
-      return;
-    }
-    if (!isLocationReadyForActiveSession()) {
-      delete document.documentElement.dataset.zapeeCoopAdVisible;
-      stopCoopAdGuide();
-      return;
-    }
-    const phase2 = readCoopFlowPhase();
-    if (phase2 && phase2 !== "await_ad" && phase2 !== "seeding_location") {
-      writeCoopFlowPhase("await_ad");
-    }
-    document.documentElement.dataset.zapeeCoopAdVisible = "true";
-    const mode = loadExecMode();
-    if (mode === "auto") {
-      clearGuidance();
-      return;
-    }
-    const text = message || "B\u1EA1n t\u1EF1 b\u1EA5m n\xFAt \u2715 theo b\xE0n tay ch\u1EC9 d\u1EABn \u0111\u1EC3 \u0111\xF3ng popup qu\u1EA3ng c\xE1o. Zapee kh\xF4ng t\u1EF1 \u0111\xF3ng.";
-    showGuidance({ checkpointId: "coop-ad", message: text });
-  }
-  function onCoopAdDismissed() {
+  function completeOptionalCoopPromoGate() {
     const sessionId = currentOrderSessionId();
-    const autoMode = loadExecMode() === "auto";
-    zLog("onCoopAdDismissed", {
+    zLog("completeOptionalCoopPromoGate", {
       sessionId,
       hasPendingPayload: Boolean(pendingCoopLocationPayload),
       hasStoredPayload: Boolean(loadOrderPayload()),
@@ -6242,7 +6361,7 @@ ${guideHighlightCss({
     }
     writeCoopFlowPhase("await_account");
     settleCoopPreAccountFlow();
-    if (!autoMode) clearGuidance();
+    clearGuidance();
     if (wasPrematureAccountNavigationBlocked() && !isCoopAccountOrAuthPath()) {
       clearPrematureAccountNavigationBlock();
       markAccountNavDone();
@@ -6251,45 +6370,15 @@ ${guideHighlightCss({
       scheduleCoopAccountNavigationFallback();
     }
   }
-  function enableCoopLocalGuides() {
-    if (!isCoopHost()) return;
-    zLog("enableCoopLocalGuides", {
-      execMode: loadExecMode(),
-      phase: readCoopFlowPhase(),
-      adDismissed: wasAdDismissedForActiveSession(),
-      url: location.href
-    });
-    startCoopAdGuide({
-      onAdVisible: onCoopAdVisible,
-      onAdDismissed: onCoopAdDismissed,
-      execMode: loadExecMode()
-    });
-  }
-  function armCoopAdAfterLocation() {
+  function continueCoopAfterLocation() {
     if (!isCoopHost() || !isLocationReadyForActiveSession()) return;
     if (isCheckoutReachedForActiveSession()) return;
-    if (wasAdDismissedForActiveSession()) {
-      onCoopAdDismissed();
-      return;
-    }
-    writeCoopFlowPhase("await_ad");
-    if (isCoopAccountOrAuthPath()) {
-      location.replace("https://cooponline.vn/");
-      return;
-    }
-    enableCoopLocalGuides();
-    const state = getCoopAdGuideState();
-    if (state === "dismissed") onCoopAdDismissed();
-    else if (state === "visible") onCoopAdVisible("");
-    else if (loadExecMode() === "auto") clearGuidance();
-    else showGuidance({
-      checkpointId: "coop-ad-wait",
-      message: "\u0110\xE3 n\u1EA1p \u0111\u1ECBa ch\u1EC9 v\xE0 c\u1EEDa h\xE0ng g\u1EA7n nh\u1EA5t. Zapee \u0111ang ch\u1EDD popup qu\u1EA3ng c\xE1o \u0111\u1EC3 b\u1EA1n b\u1EA5m \u2715."
-    });
+    stopCoopAdGuide();
+    completeOptionalCoopPromoGate();
   }
-  function startCoopLocationBeforeAd(payload) {
+  function startCoopLocationBeforeAccount(payload) {
     if (isCheckoutReachedForActiveSession()) return;
-    zLog("startCoopLocationBeforeAd", {
+    zLog("startCoopLocationBeforeAccount", {
       hasPayload: Boolean(payload),
       authSession: isAuthenticatedForActiveSession(),
       authDom: isCoopAccountAuthenticated(),
@@ -6307,7 +6396,7 @@ ${guideHighlightCss({
       return;
     }
     writeCoopFlowPhase("seeding_location");
-    continueCoopLocationFlow("Zapee \u0111ang n\u1EA1p \u0111\u1ECBa ch\u1EC9 v\xE0 c\u1EEDa h\xE0ng g\u1EA7n nh\u1EA5t v\xE0o Co.op tr\u01B0\u1EDBc khi x\u1EED l\xFD popup qu\u1EA3ng c\xE1o.");
+    continueCoopLocationFlow("Zapee \u0111ang n\u1EA1p \u0111\u1ECBa ch\u1EC9 v\xE0 c\u1EEDa h\xE0ng g\u1EA7n nh\u1EA5t v\xE0o Co.op.");
   }
   function applyCoopLocationSeed(payload) {
     if (!isCoopHost() || !payload) return;
@@ -6327,7 +6416,7 @@ ${guideHighlightCss({
         writeSessionValue(LOCATION_READY_SESSION_KEY, sessionId);
       }
       document.documentElement.dataset.zapeeCoopLocationReady = "true";
-      armCoopAdAfterLocation();
+      continueCoopAfterLocation();
     }
   }
   function persistCoopAccountMode(mode) {
@@ -6508,6 +6597,7 @@ ${guideHighlightCss({
   }
   function deactivateOrderGuidance() {
     guidanceRevisionGuard.advance();
+    resetMediaPopup();
     clearGuidance();
     clearActiveOrderSession();
     clearOrderPayload();
@@ -6571,6 +6661,7 @@ ${guideHighlightCss({
   chrome.runtime.onMessage.addListener((message) => {
     switch (message.type) {
       case "zapee_dom_op":
+        refreshMediaPopup();
         void (async () => {
           if (message.kind === "navigate" && shouldBlockCoopPostCheckoutRestartNavigation({
             checkoutReached: isCheckoutReachedForActiveSession(),
@@ -6589,17 +6680,16 @@ ${guideHighlightCss({
             targetUrl: String(message.url || ""),
             hasActiveOrderSession: Boolean(currentOrderSessionId()),
             authenticated: isAuthenticatedForActiveSession() || isCoopAccountAuthenticated(),
-            adDismissed: wasAdDismissedForActiveSession(),
             locationReady: isLocationReadyForActiveSession() || hasMatchingCoopLocationStorage()
           })) {
             const sessionId = currentOrderSessionId();
             if (sessionId) writeSessionValue(BLOCKED_ACCOUNT_NAV_SESSION_KEY, sessionId);
-            startCoopLocationBeforeAd(loadOrderPayload() || void 0);
+            startCoopLocationBeforeAccount(loadOrderPayload() || void 0);
             safeRuntimeSend({
               type: "zapee_dom_op_result",
               opId: message.opId,
               ok: false,
-              error: "coop_ad_required",
+              error: "coop_location_required",
               currentUrl: location.href
             });
             return;
@@ -6706,9 +6796,13 @@ ${guideHighlightCss({
         }
         break;
       case "zapee_retailer_runtime_config":
-        configureRetailerLiveCart(message.sessionId, message.config.cart, (snapshot) => {
-          safeRuntimeSend({ type: "zapee_live_cart", ...snapshot });
-        });
+        if (message.sessionId !== currentOrderSessionId()) break;
+        if ("cart" in message.config) {
+          configureRetailerLiveCart(message.sessionId, message.config.cart, (snapshot) => {
+            safeRuntimeSend({ type: "zapee_live_cart", ...snapshot });
+          });
+        }
+        if ("mediaPopup" in message.config) configureMediaPopup(message.sessionId, message.config.mediaPopup);
         break;
       case "zapee_session_start": {
         if (!String(message.sessionId || "").trim()) {
@@ -6728,6 +6822,7 @@ ${guideHighlightCss({
         });
         if (isNewSession) {
           guidanceRevisionGuard.advance();
+          resetMediaPopup();
           stopLiveCartPolling();
           stopCheckoutFillPolling();
           resetCoopCheckoutFill();
@@ -6806,7 +6901,7 @@ ${guideHighlightCss({
             if (!isCoopAccountOrAuthPath()) scheduleCoopAccountNavigationFallback();
           }
         } else {
-          startCoopLocationBeforeAd(message.payload);
+          startCoopLocationBeforeAccount(message.payload);
         }
         window.setTimeout(() => maybeNotifyAccountReady(), 400);
         if (isCoopAccountPath()) watchCoopAccountReady(message.payload);
@@ -6830,9 +6925,6 @@ ${guideHighlightCss({
           startCheckoutFillPolling();
         } else {
           stopCheckoutFillPolling();
-        }
-        if (isCoopHost() && !isCheckoutReachedForActiveSession() && isLocationReadyForActiveSession() && !wasAdDismissedForActiveSession() && !isCoopAccountAuthenticated() && !isAuthenticatedForActiveSession()) {
-          enableCoopLocalGuides();
         }
         break;
       }
@@ -6877,6 +6969,7 @@ ${guideHighlightCss({
       case "zapee_session_end":
         if (message.sessionId && message.sessionId !== currentOrderSessionId()) break;
         guidanceRevisionGuard.advance();
+        resetMediaPopup(message.sessionId);
         resetRetailerLiveCart(message.sessionId);
         clearGuidance();
         clearActiveOrderSession();

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "ZapAssist",
+  "name": "Zap-XuXu",
   "description": "Trợ lý Zapee hướng dẫn và hỗ trợ hoàn tất đơn hàng đã tạo trên Zapee tại các website bán lẻ được hỗ trợ.",
-  "version": "0.1.35",
+  "version": "0.1.45",
   "browser_specific_settings": {
     "gecko": {
       "id": "zapee-assistant@zapee.one",

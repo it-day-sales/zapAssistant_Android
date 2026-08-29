@@ -1,6 +1,6 @@
 # PORTING.md — Chrome → Firefox for Android (Fenix)
 
-Bản port Firefox for Android của extension **ZapAssist** (Zapee Assistant). Chuỗi
+Bản port Firefox for Android của extension **Zap-XuXu** (tên cũ: ZapAssist / Zapee Assistant). Chuỗi
 port: **Chrome Desktop** (repo `affree`, `extension/`, TypeScript → esbuild) →
 **iOS Safari** (repo `zapeeAsistant_iOS` — đã giải các bài toán mobile B1–B7) →
 **Firefox Android** (repo này — kế thừa kiến trúc iOS + delta Firefox F1–F8).
@@ -170,7 +170,7 @@ Chuỗi nhân-quả (dừng ở mắt xích đứt đầu tiên) — **thêm m�
 
 | # | Mắt xích | Nếu đứt thì kết luận là |
 |---|---|---|
-| 0 | quyền `<all_urls>` (`permissions.contains`) | **user chưa cấp/đã thu hồi quyền truy cập trang web** (F2) — bật trong Extensions → ZapAssist |
+| 0 | quyền `<all_urls>` (`permissions.contains`) | **user chưa cấp/đã thu hồi quyền truy cập trang web** (F2) — bật trong Extensions → Zap-XuXu |
 | 1 | `chrome.storage.session` dùng được | cần Firefox 115+ (manifest đã khoá 128+) |
 | 2 | `sessionEngine` heartbeat | content script chưa hề chạy → gần như chắc chắn mắt xích #0, hoặc site bị quarantine |
 | 3 | `shimInstalled` | shim messaging không cài được → content.js không nói được với background |
@@ -219,6 +219,30 @@ viết bridge client dùng chung iOS + Firefox trong affree theo hợp đồng t
 
 ## Sync log
 
+### Sync upstream 28/08 (hytek_branch `53fe94d`, 0.1.35 → 0.1.45 "Zap-XuXu") — 29/08/2026
+
+- Đổi tên hiển thị `ZapAssist` → **`Zap-XuXu`** + bộ icon/brand mới (manifest,
+  icons/, brand/ theo upstream). Bundle build lại từ `53fe94d`:
+  `content.js` (+media-popup.ts, preventDefaultNavigation cho dom_op click,
+  mascot 10 trạng thái — mascot/ có thêm alert/delivery/thinking/writing +
+  thư mục `trang-phuc/`), `page-bridge.js`, re-áp đúng 2 patch chèn-thuần
+  (context còn nguyên). `sidepanel.*` KHÔNG đổi → panel không phải port gì.
+- `background.js`: handler `zapee_page_click` nhận `preventDefaultNavigation`
+  (chặn điều hướng mặc định của anchor/form trong lúc click MAIN-world, không
+  stopPropagation); thêm `alibaba` vào fallback check-support.
+- `session-engine.js` port 2 fix upstream: (1) `onRuntimeConfig` MERGE thay vì
+  ghi đè — recipe cấu hình reader độc lập ở các checkpoint khác nhau, replay
+  sau document load phải còn reader cũ; (2) WS đóng sạch (1000/1005/null)
+  KHÔNG gửi `zapee_engine_session_ended` nữa — đóng sạch không phải bằng chứng
+  đơn kết thúc (OAuth/điều hướng sau đăng ký), giữ activeOrderHandoff để
+  reconnect ở URL hỗ trợ kế tiếp.
+- **Hunk upstream SKIP có chủ đích** (cùng nhóm multi-tab desktop đã skip ở
+  sync trước): `findSessionOwningTab`/`adoptRetailerSuccessorTab`/
+  `findSupportedOpenTab`/`ownerTabIsOpen` + listener `chrome.tabs.onReplaced`
+  (Firefox không phát sự kiện này; mô hình mobile: tab kế vị tự claim/resume
+  qua `zapee_engine_boot`); `navigationDocumentIsReady`/`executeNavigateInTab`;
+  `observationOnly ||=` → `=` (entry engine tạo lại theo trang, không tái claim).
+
 ### Baseline khởi tạo (25/08/2026)
 
 - Bundle Chrome: affree `hytek_branch` @ `2a4f94d`, manifest `ZapAssist` 0.1.35,
@@ -252,7 +276,7 @@ viết bridge client dùng chung iOS + Firefox trong affree theo hợp đồng t
 
 0. Cài **Firefox Nightly** (`org.mozilla.fenix`), bật USB debugging →
    `npm run start:android -- --android-device <serial>`.
-1. **F2 trước tiên**: menu ⋮ → Extensions → ZapAssist → bật *Access your data
+1. **F2 trước tiên**: menu ⋮ → Extensions → Zap-XuXu → bật *Access your data
    for all websites* → mở popup: mắt xích **#0 xanh**. Site đích không bị
    restricted/quarantine.
 2. **Shim**: mở một trang bán lẻ → popup chẩn đoán có heartbeat `sessionEngine`

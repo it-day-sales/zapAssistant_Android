@@ -1,4 +1,4 @@
-# ZapAssist — Firefox for Android
+# Zap-XuXu — Firefox for Android
 
 > ✅ **Trạng thái hiện tại** — port đầy đủ từ kiến trúc mobile của bản iOS Safari
 > (repo `zapeeAsistant_iOS`), baseline bundle Chrome **v0.1.35** (affree
@@ -48,11 +48,11 @@ trên điện thoại.
 MV3 trên Firefox coi host permission `<all_urls>` là quyền **có thể thu hồi**:
 nếu chưa cấp, content script lặng lẽ không chạy và extension "như chết".
 
-1. Firefox Android → menu ⋮ → **Extensions** → **ZapAssist**.
+1. Firefox Android → menu ⋮ → **Extensions** → **Zap-XuXu**.
 2. Bật **Access your data for all websites** (Truy cập dữ liệu của bạn trên mọi
    trang web). Với site đang mở: biểu tượng mảnh ghép trên thanh địa chỉ →
    cấp quyền cho site.
-3. Mở popup của extension (menu ⋮ → Extensions → ZapAssist) → màn chẩn đoán,
+3. Mở popup của extension (menu ⋮ → Extensions → Zap-XuXu) → màn chẩn đoán,
    mắt xích **#0 Quyền truy cập trang web** phải xanh.
 4. Nếu trang đích nằm trong danh sách "restricted sites" của Mozilla (hiếm):
    bật thêm **Run in restricted sites** trong cài đặt extension.

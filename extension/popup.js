@@ -117,7 +117,7 @@
     const engine = state.sessionEngine;
     if (!engine) {
       return {
-        verdict: "Content script CHƯA HỀ CHẠY trên trang nào → gần như chắc chắn chưa cấp quyền website (menu ⋮ → Extensions → ZapAssist → Access your data for all websites), hoặc site bị Mozilla quarantine — chứ không phải lỗi code.",
+        verdict: "Content script CHƯA HỀ CHẠY trên trang nào → gần như chắc chắn chưa cấp quyền website (menu ⋮ → Extensions → Zap-XuXu → Access your data for all websites), hoặc site bị Mozilla quarantine — chứ không phải lỗi code.",
         cls: "diag-bad"
       };
     }
@@ -177,7 +177,7 @@
 
   function buildReport(state, log, storageSession, verdict) {
     const lines = [];
-    lines.push("=== ZAPASSIST — CHẨN ĐOÁN (FIREFOX ANDROID) ===");
+    lines.push("=== ZAP-XUXU — CHẨN ĐOÁN (FIREFOX ANDROID) ===");
     lines.push(`Thời điểm: ${new Date().toISOString()}`);
     lines.push(`Kết luận: ${verdict}`);
     lines.push(`User-Agent: ${navigator.userAgent}`);
@@ -243,7 +243,7 @@
         "Quyền truy cập trang web",
         allUrlsGranted
           ? "đã cấp <all_urls>"
-          : "CHƯA CẤP — bật “Access your data for all websites” trong menu ⋮ → Extensions → ZapAssist",
+          : "CHƯA CẤP — bật “Access your data for all websites” trong menu ⋮ → Extensions → Zap-XuXu",
         allUrlsGranted ? "diag-ok" : "diag-bad"
       );
     }

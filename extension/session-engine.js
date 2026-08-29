@@ -727,11 +727,13 @@
       },
       onRuntimeConfig: (config) => {
         if (!entry.active || session !== entry) return;
-        entry.runtimeConfig = config;
+        // Sync 0.1.45: recipe cấu hình các DOM reader độc lập ở những checkpoint
+        // khác nhau — merge để reader cũ vẫn còn khi replay sau document load.
+        entry.runtimeConfig = { ...entry.runtimeConfig, ...config };
         deliverToTab({
           type: "zapee_retailer_runtime_config",
           sessionId: entry.sessionId,
-          config
+          config: entry.runtimeConfig
         });
       },
       onOrderCompleted: (result) => {
@@ -812,7 +814,11 @@
           }
           persistTerminalFailure(code, reason);
         } else if (code === 1e3 || code === 1005 || code == null) {
-          void bgSend({ type: "zapee_engine_session_ended", sessionId: entry.sessionId, chain: entry.chain });
+          // Sync 0.1.45: socket đóng sạch KHÔNG phải bằng chứng đơn đã kết thúc —
+          // OAuth / điều hướng sau đăng ký có thể đóng kết nối recipe khi đơn nháp
+          // còn sống. GIỮ activeOrderHandoff (không gửi zapee_engine_session_ended)
+          // để tab này reconnect ở URL được hỗ trợ kế tiếp; record bị xóa khi có
+          // đơn mới thay thế hoặc phiên kết thúc thật (orderCompleted).
           deliverToTab({ type: "zapee_session_end", sessionId: entry.sessionId });
           schedulePanelRender();
         }

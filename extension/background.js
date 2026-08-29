@@ -361,6 +361,7 @@ function fallbackCheckUrlSupport(url) {
       { key: "wm", chain: "walmart" },
       { key: "pnj", chain: "pnj" },
       { key: "costco", chain: "costco" },
+      { key: "alibaba", chain: "alibaba" },
       { key: "premiumoutlets", chain: "premiumoutlets" },
       { key: "tuoixanhnhanhngon", chain: "tuoixanhnhanhngon" }
     ];
@@ -894,8 +895,8 @@ if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
         chrome.scripting.executeScript({
           target: frameIds ? { tabId, frameIds } : { tabId, allFrames: true },
           world: "MAIN",
-          args: [token, "data-zapee-page-click"],
-          func: (clickToken, attr) => {
+          args: [token, "data-zapee-page-click", message.preventDefaultNavigation === true],
+          func: (clickToken, attr, preventDefaultNavigation) => {
             const el = document.querySelector(`[${attr}="${clickToken}"]`);
             if (!(el instanceof HTMLElement)) return false;
             try {
@@ -903,7 +904,18 @@ if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
             } catch {
               // Focus chỉ best-effort; click mới là hợp đồng.
             }
-            el.click();
+            const blockDefault = (event) => {
+              const target = event.target;
+              if (target === el || target instanceof Node && el.contains(target)) event.preventDefault();
+            };
+            if (preventDefaultNavigation) document.addEventListener("click", blockDefault);
+            try {
+              // Không stopPropagation: React/Fusion vẫn nhận click và có thể mở
+              // panel — chỉ hủy hành vi điều hướng mặc định của anchor/form.
+              el.click();
+            } finally {
+              if (preventDefaultNavigation) document.removeEventListener("click", blockDefault);
+            }
             return true;
           }
         }).then((injection) => {
