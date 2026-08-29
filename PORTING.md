@@ -237,9 +237,15 @@ control-surface). Mỗi 1,5s (khi tab hiển thị) đọc 3 khóa storage của
 | `gqd_cart` | localStorage | `CartItem[]` (`lib/cart.ts`): product + offer (store.chain/id/terminalCode, productUrl) — nguồn chain/URL cho từng dòng |
 | `gqd_buyer` | localStorage | `BuyerProfile` (`lib/profile.ts`): name/email/phone/address/zip |
 
-Reader ghép `cbz.carts[i]` với nhóm giỏ (replicate `cartGroupKey`: Co.op theo
-`coop:<terminalCode>`, còn lại theo store.id; khớp bằng key trong orderKey +
-độ trùng tên sản phẩm), dựng payload đúng shape `startExtensionOrder` của web
+Nhận diện chuỗi + URL sản phẩm: nguồn CHÍNH là chính `orderKey`
+(persistOrderKey của web nhúng `key::url|name|qty|price|…` theo đúng thứ tự
+store/dòng — reader chạy con trỏ tiến, tách đúng cả khi hai cửa hàng có món
+trùng tên/giá; user sửa qty giữa phiên thì anchor lùi xuống khớp theo tên).
+Nhờ vậy **đơn "Mua ngay" không qua giỏ hàng (bug BHX 29/08) vẫn đọc đúng** —
+`gqd_cart` chỉ còn là nguồn PHỤ để enrich ảnh/chi nhánh (nhóm giỏ khớp nhầm
+chuỗi khác với URL thì bị bỏ). Ghép nhóm giỏ replicate `cartGroupKey` (Co.op
+theo `coop:<terminalCode>`, còn lại store.id). Payload dựng đúng shape
+`startExtensionOrder` của web
 (products/requestedProducts/shippingAddress/paymentMethod/slot/orderStores/
 nextStore…), rồi gửi `zapee_scraped_order` xuống background. Background:
 gác `senderIsControlSurface` → mint token qua `GET {webApp}/api/agent/token`

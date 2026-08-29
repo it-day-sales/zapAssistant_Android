@@ -28,16 +28,24 @@ function extractFn(name) {
 }
 
 function extractVar(name) {
-  const at = SRC.indexOf(`var ${name} = {`);
+  const at = SRC.indexOf(`var ${name} = `);
   if (at < 0) throw new Error(`${name} không thấy`);
-  const end = SRC.indexOf("};", at);
-  return SRC.slice(at, end + 2);
+  const open = at + `var ${name} = `.length;
+  const openChar = SRC[open];
+  const closeChar = openChar === "[" ? "]" : "}";
+  let depth = 0;
+  for (let j = open; j < SRC.length; j++) {
+    if (SRC[j] === openChar) depth++;
+    else if (SRC[j] === closeChar && --depth === 0) return SRC.slice(at, j + 2);
+  }
+  throw new Error(`${name}: ngoặc không cân`);
 }
 
 const CODE = [
   extractVar("CHAIN_ENTRY"),
   extractVar("CHAIN_LABEL"),
-  ...["executionChain", "chainOfCartItem", "cartGroupKey", "groupCart", "normName", "matchGroup", "productOf", "buildScrapedOrder", "buildPayload"].map(extractFn),
+  extractVar("HOST_CHAIN"),
+  ...["executionChain", "chainOfCartItem", "chainFromUrl", "lineFromOrderKey", "cartGroupKey", "groupCart", "normName", "matchGroup", "productOf", "buildScrapedOrder", "buildPayload"].map(extractFn),
   "return { buildScrapedOrder, buildPayload, executionChain };",
 ].join("\n");
 const { buildScrapedOrder, buildPayload, executionChain } = new Function(CODE)();
@@ -104,5 +112,43 @@ ok(order2.stores.find((s) => s.chain === "coop").placed === true, "status placed
 
 // 5. Thiếu dữ liệu → null, không ném
 ok(buildScrapedOrder(null, cart, buyer) === null && buildScrapedOrder({}, cart, buyer) === null, "storage thiếu/hỏng → null êm");
+
+// 6. ĐƠN "MUA NGAY" BHX — không đi qua giỏ hàng (gqd_cart trống/không liên quan).
+// orderKey đúng format persistOrderKey của web: `<orderCode>::<key>::<url|name|qty|price|v1|v2>::<streamSig>`
+// → reader phải nhận diện chuỗi + URL trực tiếp từ orderKey (bug BHX 29/08).
+const buyNowCbz = {
+  orderKey: "legacy::BHX_00777::https://www.bachhoaxanh.com/sua-tuoi/sua-vnm-180ml|Sữa tươi Vinamilk 180ml lốc 4|3|30000||::",
+  step: "session",
+  active: 0,
+  defaultMode: "zapee",
+  status: ["idle"],
+  carts: [[{ name: "Sữa tươi Vinamilk 180ml lốc 4", qty: 3, unitPrice: 30000 }]],
+  pays: ["cod"],
+};
+const buyNow = buildScrapedOrder(buyNowCbz, [], buyer);
+ok(buyNow && buyNow.stores.length === 1 && buyNow.stores[0].chain === "bhx", "Mua ngay BHX (giỏ trống): chain nhận từ URL trong orderKey");
+ok(buyNow.stores[0].products[0].url === "https://www.bachhoaxanh.com/sua-tuoi/sua-vnm-180ml", "URL sản phẩm lấy thẳng từ orderKey, không cần giỏ");
+
+// 7. User sửa QTY giữa phiên (orderKey giữ qty gốc) → anchor lùi xuống khớp theo tên, vẫn ra chuỗi + URL
+const editedCbz = { ...buyNowCbz, carts: [[{ name: "Sữa tươi Vinamilk 180ml lốc 4", qty: 5, unitPrice: 30000 }]] };
+const edited = buildScrapedOrder(editedCbz, [], buyer);
+ok(edited && edited.stores[0].chain === "bhx" && edited.stores[0].products[0].qty === 5 && edited.stores[0].products[0].url.includes("bachhoaxanh.com"), "qty sửa giữa phiên: vẫn nhận chuỗi/URL, qty theo phiên (5)");
+
+// 8. Hai cửa hàng có món TRÙNG TÊN + GIÁ — con trỏ tiến tách đúng URL theo từng cửa hàng
+const dupCbz = {
+  orderKey: "legacy::COOP_1::https://cooponline.vn/mi-gois|Mì gói|1|5000||::|BHX_2::https://www.bachhoaxanh.com/mi-goi|Mì gói|1|5000||::",
+  step: "session",
+  status: ["idle", "idle"],
+  carts: [[{ name: "Mì gói", qty: 1, unitPrice: 5000 }], [{ name: "Mì gói", qty: 1, unitPrice: 5000 }]],
+  pays: ["qr", "cod"],
+};
+const dup = buildScrapedOrder(dupCbz, [], buyer);
+ok(dup && dup.stores.length === 2 && dup.stores[0].chain === "coop" && dup.stores[1].chain === "bhx", "món trùng tên/giá ở 2 cửa hàng: con trỏ tiến tách đúng chuỗi từng store");
+ok(dup.stores[0].products[0].url.includes("cooponline.vn") && dup.stores[1].products[0].url.includes("bachhoaxanh.com"), "URL từng dòng về đúng cửa hàng của nó");
+
+// 9. Nhóm giỏ khớp nhầm chuỗi khác URL → bỏ enrichment nhóm (không lây branch/ảnh sai)
+const wrongCart = [{ product: { name: "Sữa tươi Vinamilk 180ml lốc 4", image: "https://img/coop.jpg" }, offer: offer("coop", "COOP_9", "Co.opmart X", "https://cooponline.vn/sua"), qty: 3 }];
+const guarded = buildScrapedOrder(buyNowCbz, wrongCart, buyer);
+ok(guarded.stores[0].chain === "bhx" && guarded.stores[0].products[0].url.includes("bachhoaxanh.com") && !guarded.stores[0].branch, "chain từ URL thắng nhóm giỏ khớp nhầm; enrichment nhóm sai bị bỏ");
 
 console.log(`\n✓ ${pass} kiểm tra reader đều đạt`);

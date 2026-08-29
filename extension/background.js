@@ -889,7 +889,21 @@ if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
               at: new Date().toISOString(),
               orderKey: String(message.orderKey || "").slice(0, 80),
               imported,
-              skipped
+              skipped,
+              // Bản tóm tắt những gì reader ĐỌC ĐƯỢC — "đọc data chưa đúng"
+              // phải nhìn thấy được ở đây (popup + Copy log) thay vì đoán mò.
+              stores: drafts.map((draft) => {
+                const products = Array.isArray(draft?.payload?.products) ? draft.payload.products : [];
+                return {
+                  chain: String(draft?.chain || ""),
+                  items: products.length,
+                  qty: products.reduce((sum, p) => sum + (Number(p?.qty) || 0), 0),
+                  total: products.reduce((sum, p) => sum + (Number(p?.lineTotal) || 0), 0),
+                  urls: `${products.filter((p) => p?.url).length}/${products.length}`,
+                  pay: String(draft?.payload?.paymentMethod || ""),
+                  firstItem: String(products[0]?.name || "").slice(0, 60)
+                };
+              })
             }
           });
           void diagLog("bg", `scraped_order: nhặt [${imported.join(", ")}]${skipped.length ? ` · bỏ qua [${skipped.join("; ")}]` : ""}`);

@@ -90,6 +90,49 @@
     return "";
   }
 
+  // Nhận diện chuỗi từ URL sản phẩm (host) — nguồn chắc nhất vì orderKey của
+  // web nhúng sẵn URL từng dòng hàng (persistOrderKey: `key::url|name|qty|…`).
+  var HOST_CHAIN = [
+    ["bachhoaxanh.com", "bhx"],
+    ["cooponline.vn", "coop"],
+    ["shopee.vn", "shopee"],
+    ["alibaba.com", "alibaba"]
+  ];
+  function chainFromUrl(url) {
+    try {
+      const host = new URL(String(url || "")).hostname.toLowerCase();
+      for (const [suffix, chain] of HOST_CHAIN) {
+        if (host === suffix || host.endsWith(`.${suffix}`)) return chain;
+      }
+    } catch {
+    }
+    return "";
+  }
+
+  // Tìm dòng hàng trong orderKey bằng con trỏ tiến (các cửa hàng và dòng hàng
+  // trong orderKey đúng thứ tự carts[i][j]): anchor `|name|qty|price|`, không
+  // thấy (user đã sửa qty giữa phiên) thì lùi xuống `|name|`. URL của dòng nằm
+  // ngay TRƯỚC anchor, tính từ delimiter gần nhất ("::" đầu productSig hoặc ","
+  // giữa các dòng). Trả { url, next } — next là con trỏ mới.
+  function lineFromOrderKey(orderKey, cursor, line) {
+    const name = String(line && line.name || "");
+    if (!name || name.includes("|")) return null;
+    const full = `|${name}|${Math.max(1, Number(line && line.qty) || 1)}|${Number(line && line.unitPrice) || 0}|`;
+    let at = orderKey.indexOf(full, cursor);
+    let anchorLen = full.length;
+    if (at < 0) {
+      const nameOnly = `|${name}|`;
+      at = orderKey.indexOf(nameOnly, cursor);
+      anchorLen = nameOnly.length;
+      if (at < 0) return null;
+    }
+    const sepColon = orderKey.lastIndexOf("::", at);
+    const sepComma = orderKey.lastIndexOf(",", at);
+    const start = Math.max(sepColon >= 0 ? sepColon + 2 : 0, sepComma >= 0 ? sepComma + 1 : 0);
+    const url = orderKey.slice(start, at);
+    return { url: /^https?:\/\//.test(url) ? url : "", next: at + anchorLen };
+  }
+
   // Replicate cartGroupKey (lib/cobrowse-build.ts): Co.op gom theo terminal,
   // còn lại theo store.id; kênh bán chèn hậu tố ::ch:<id>. Thứ tự nhóm =
   // first-encounter (newestFirst:false — đúng nhánh checkout).
@@ -143,7 +186,7 @@
     return bestScore > 0 ? best : null;
   }
 
-  function productOf(line, group) {
+  function productOf(line, group, anchorUrl) {
     const name = String(line && line.name || "");
     const qty = Math.max(1, Number(line && line.qty) || 1);
     const unitPrice = Number(line && line.unitPrice) || 0;
@@ -152,7 +195,9 @@
     if (line && line.emoji) product.emoji = String(line.emoji);
     const match = group && group.items.find((item) => normName(item.product && item.product.name) === normName(name));
     const offer = match && match.offer || null;
-    const url = offer && (offer.productUrl || offer.url) || match && match.product && match.product.url;
+    // Ưu tiên URL nhúng trong orderKey (đúng dòng, đúng cửa hàng, có cả cho đơn
+    // "Mua ngay" không qua giỏ); giỏ chỉ còn là nguồn phụ.
+    const url = anchorUrl || offer && (offer.productUrl || offer.url) || match && match.product && match.product.url;
     if (url) product.url = String(url);
     if (!product.image && match && match.product && match.product.image) product.image = String(match.product.image);
     return product;
@@ -167,16 +212,43 @@
     const groups = groupCart(cartItems);
     const used = new Set();
     const stores = [];
+    // Con trỏ tiến trên orderKey: các segment cửa hàng và dòng hàng nằm đúng
+    // thứ tự carts[i][j], nên mỗi anchor tìm được đẩy con trỏ lên — hai cửa
+    // hàng có món trùng tên/giá vẫn tách đúng.
+    let cursor = orderKey.indexOf("::") >= 0 ? orderKey.indexOf("::") + 2 : 0;
     for (let i = 0; i < cbz.carts.length; i++) {
       const lines = Array.isArray(cbz.carts[i]) ? cbz.carts[i] : [];
       if (!lines.length) continue;
+      // 1) Nguồn chính: URL nhúng trong orderKey (chạy được cả đơn "Mua ngay"
+      //    không qua giỏ hàng — gqd_cart trống hoặc chứa món không liên quan).
+      const anchorUrls = [];
+      let storeCursor = cursor;
+      for (const line of lines) {
+        const found = lineFromOrderKey(orderKey, storeCursor, line);
+        if (found) {
+          anchorUrls.push(found.url);
+          storeCursor = found.next;
+        } else {
+          anchorUrls.push("");
+        }
+      }
+      if (storeCursor > cursor) cursor = storeCursor;
+      let chain = "";
+      for (const url of anchorUrls) {
+        chain = chainFromUrl(url);
+        if (chain) break;
+      }
+      // 2) Nguồn phụ: nhóm giỏ hàng (enrich URL/ảnh, hoặc cứu chain khi
+      //    orderKey không nhúng URL cho chuỗi này).
       const group = matchGroup(groups, used, orderKey, lines);
       if (group) used.add(group.key);
-      const chain = group ? group.chain : "";
+      if (!chain) chain = group ? group.chain : "";
       if (!chain || !CHAIN_ENTRY[chain]) continue;
+      // Nhóm giỏ khớp nhầm sang chuỗi khác (món trùng tên) → bỏ enrichment.
+      const enrichGroup = group && (!group.chain || group.chain === chain) ? group : null;
       const placed = Array.isArray(cbz.status) && cbz.status[i] === "placed";
-      const products = lines.map((line) => productOf(line, group));
-      const firstOffer = group && group.items[0] && group.items[0].offer || null;
+      const products = lines.map((line, j) => productOf(line, enrichGroup, anchorUrls[j]));
+      const firstOffer = enrichGroup && enrichGroup.items[0] && enrichGroup.items[0].offer || null;
       const storeRaw = firstOffer && firstOffer.store || {};
       stores.push({
         index: i,

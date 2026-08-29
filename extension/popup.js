@@ -254,10 +254,13 @@
     if (reader) {
       const importedList = Array.isArray(reader.imported) ? reader.imported : [];
       const skippedList = Array.isArray(reader.skipped) ? reader.skipped : [];
+      const storeSummaries = Array.isArray(reader.stores)
+        ? reader.stores.map((s) => `${s.chain}: ${s.items} món (${s.qty} sp, ${Math.round((s.total || 0) / 1000)}k, URL ${s.urls}, ${s.pay})`)
+        : [];
       row(
         details,
         "Đơn từ trang Zapee",
-        `${importedList.length ? `đã nhặt: ${importedList.join(", ")}` : "chưa nhặt được cửa hàng nào"}${skippedList.length ? ` · bỏ qua: ${skippedList.join("; ")}` : ""} · ${ageText(reader.at)}`,
+        `${importedList.length ? `đã nhặt: ${importedList.join(", ")}` : "chưa nhặt được cửa hàng nào"}${skippedList.length ? ` · bỏ qua: ${skippedList.join("; ")}` : ""} · ${ageText(reader.at)}${storeSummaries.length ? `\n${storeSummaries.join("\n")}` : ""}`,
         importedList.length ? "diag-ok" : "diag-warn"
       );
     }
