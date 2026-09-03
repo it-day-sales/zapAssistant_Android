@@ -591,6 +591,10 @@
       error: result.error,
       visible: result.visible,
       text: result.text,
+      // Sync 0.1.48: dom_op_result có thêm field `values` (mảng chuỗi DOM công
+      // khai đã bounding/dedup). Frame này dựng bằng ALLOW-LIST field cứng nên
+      // thiếu dòng này là values bị DROP ÂM THẦM — server không hề báo lỗi.
+      values: result.values,
       currentUrl: result.currentUrl
     });
   }

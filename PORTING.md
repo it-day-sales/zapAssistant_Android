@@ -5,9 +5,10 @@ port: **Chrome Desktop** (repo `affree`, `extension/`, TypeScript → esbuild) �
 **iOS Safari** (repo `zapeeAsistant_iOS` — đã giải các bài toán mobile B1–B7) →
 **Firefox Android** (repo này — kế thừa kiến trúc iOS + delta Firefox F1–F8).
 
-**Baseline:** bundle Chrome **v0.1.35** build từ affree `hytek_branch` @
-`2a4f94d`; 4 file kiến trúc mobile (PORTED) lấy từ `zapeeAsistant_iOS` @
-`056c398` rồi đồng bộ lên 0.1.35 (xem mục Sync log).
+**Baseline hiện tại:** bundle Chrome **v0.1.48** build từ affree `hytek_branch`
+@ `ad0deba` (03/09/2026); 4 file kiến trúc mobile (PORTED) gốc từ
+`zapeeAsistant_iOS` @ `056c398`, đã đồng bộ dần lên 0.1.48 — xem mục **Sync
+log** cho từng đợt (khởi tạo 0.1.35 · 0.1.45 · 0.1.48).
 
 ## Kiến trúc bản Android (đã hiện thực)
 
@@ -271,6 +272,69 @@ FILE_RULES parity, gác bằng test:reader + grep-gate.
 
 ## Sync log
 
+### Sync upstream 03/09 (hytek_branch `ad0deba`, 0.1.45 → 0.1.48) — 03/09/2026
+
+Diff upstream rất gọn (9 file, +335/−59) và xoay quanh MỘT tính năng mới:
+dom_op kind `background_capture_values`.
+
+- **Bundle build lại từ `ad0deba`**: chỉ `content.js` đổi (`popup.*`,
+  `sidepanel.*`, `page-bridge.js` **byte-identical** với 0.1.45 → không phải
+  port lại lớp panel, không phải áp lại patch popup). Re-áp đúng 2 patch
+  chèn-thuần (context còn nguyên; 7150 + 11 + 3 = 7164 dòng). Nhận miễn phí:
+  Co.op đọc giỏ ở `/checkout` không cần anchor `a[href*='--s']`
+  (`readCheckoutSummaryDom` viết lại), bỏ trần số lượng 20 khi set qty trên PDP
+  (`normalizeCoopProductQty`), executor trả `background_only_operation` cho op
+  mới, protocol có `values`/`source`/`pattern`/`patternGroup`/`maxItems`.
+- **⚠️ Asset: 49 file mascot bị thiếu, `npm run parity` báo DƯƠNG TÍNH GIẢ.**
+  0.1.48 thêm `mascot/than-dau/`, `mascot/tieng/` và 20 file
+  `mascot/trang-phuc/*` + đổi `lung-canh.png` (13 → 62 file). `checkAssets` cũ
+  chỉ quét 1 tầng và `continue` khi gặp thư mục con nên vẫn in
+  "✓ mascot/ identical". Đã copy đệ quy toàn bộ `mascot/` VÀ **sửa
+  `checkAssets` quét đệ quy** (báo MISSING/differs theo đường dẫn tương đối, và
+  `note` file chỉ có ở bản Android) — dương tính giả kiểu này tệ hơn không kiểm.
+- **`session-engine.js`: thêm `values` vào `sendDomOpResultToServer`** — frame
+  `dom_op_result` dựng bằng ALLOW-LIST field cứng, thiếu dòng này thì `values`
+  bị DROP ÂM THẦM (server không báo lỗi). 1 dòng, làm ngay dù op chưa hỗ trợ.
+- **`background_capture_values`: KHÔNG hiện thực trên Android (gap đã biết).**
+  Ở bản Chrome op này mở một tab tạm ẩn (`tabs.create about:blank` →
+  `tabs.update` → poll `tabs.get` → `scripting.executeScript` world ISOLATED)
+  để đọc chuỗi DOM công khai từ MỘT URL KHÁC trang phiên. Bản mobile không làm
+  được và cũng không cần viết dòng nào, vì:
+  (a) manifest mobile chỉ xin `storage` + `scripting` + `<all_urls>`, **không có
+  quyền `tabs`**; background là event page stateless, không giữ `sessions` Map
+  / WebSocket nên không có `entry.connection` để trả `dom_op_result`;
+  (b) trái quyết định **D3** (một code path single-tab cho mọi bản mobile) và
+  cùng nhóm hunk multi-tab desktop đã SKIP từ các sync trước;
+  (c) không có tương đương in-tab trung thực: `fetch` + `DOMParser` không chạy
+  JS nên trang React trả rỗng, iframe ẩn bị `X-Frame-Options`/CSP chặn;
+  (d) **hỏng đã có kiểm soát và miễn phí**: content.js 0.1.48 trả
+  `ok:false, error:"background_only_operation"`, phía agent-server cả hai action
+  dùng op này (đều trong `alibaba.json`) đặt `"optional": true` nên runtime
+  catch-continue → phiên KHÔNG treo. Vì vậy cũng **không chèn short-circuit
+  trong `session-engine.js`** (đã cân nhắc rồi bỏ: nhánh đó là dead code, và đặt
+  chuỗi lỗi mới còn rủi ro nếu server có xử lý riêng theo chuỗi).
+  Khi nào recipe ngoài Alibaba bắt đầu dùng op này thì đây là **gap đã biết**,
+  không phải bug mới.
+- **Hunk upstream SKIP có chủ đích** (ghi để lần sau khỏi điều tra lại):
+  `executeBackgroundCaptureValues` + Set `backgroundCaptureTabs` (chỉ cần khi
+  hiện thực op — kèm nó là 2 guard chống tab tạm tự claim đơn qua `hostsMatch`
+  trong `resolveEngineBoot`/`zapee_content_ready`); `backgroundCaptureTabs.clear()`
+  trong `resetEphemeralBackgroundState` (bản mobile **không có** hàm này — state
+  nằm trong `storage.session`, trình duyệt tự xoá); guard trong
+  `tryAssociateUnlessReserved`; `gestureCreatedBySource`/`sidePanelOpenGates`;
+  `extension/CHROME-WEB-STORE.md` (bản Android lên AMO, không có file này).
+- **Yêu cầu ngược lên upstream (perf, chưa vá bên mobile)**:
+  `checkoutQuantityMarkers` gọi `[...root.querySelectorAll("*")].filter(visible)`
+  — mỗi element một `getBoundingClientRect()` + `getComputedStyle()` (force
+  layout) cho VÀI NGHÌN node trang `/checkout` Co.op, chạy dày (interval 1500ms
+  + debounce 450ms từ MutationObserver và listener click/change/input). Desktop
+  không ai để ý; trên Fenix tab còn phải cõng thêm session-engine + panel
+  overlay + WebSocket nên là nguồn jank/pin thật. **Không tự vá content.js**
+  (parity chỉ cho đúng 2 patch chèn-thuần — thêm patch thứ 3 là mở tiền lệ
+  divergence): đã thêm mục QA #10 để đo trên máy thật; nếu jank thì đề nghị
+  upstream bó `root` về `document.querySelector('main') || document.body` hoặc
+  lọc theo `textContent` trước khi gọi `visible()`.
+
 ### Sync upstream 28/08 (hytek_branch `53fe94d`, 0.1.35 → 0.1.45 "Zap-XuXu") — 29/08/2026
 
 - Đổi tên hiển thị `ZapAssist` → **`Zap-XuXu`** + bộ icon/brand mới (manifest,
@@ -361,6 +425,15 @@ FILE_RULES parity, gác bằng test:reader + grep-gate.
    extension về idle gọn, không kẹt handoff cũ.
 9. **Popup**: full-width đọc được (F3), nút "Kiểm tra kết nối" + "Copy log"
    chạy; để ý Android "Open in app" cướp navigation → ghi nhận nếu gặp.
+10. **Hiệu năng trang /checkout Co.op (mới 0.1.48)**: mở `/checkout`, cuộn
+    trang ~30s, thử tăng/giảm số lượng vài lần. Theo dõi: khung hình có tụt
+    (panel/trang đứng), máy có nóng lên rõ. Nguyên nhân nếu có: reader giỏ mới
+    quét `querySelectorAll("*")` + `getBoundingClientRect()`/`getComputedStyle()`
+    trên mọi node, chạy dày (interval 1500ms + debounce 450ms) — xem mục "Yêu
+    cầu ngược lên upstream" trong Sync log 03/09. KHÔNG tự vá content.js.
+11. **Mascot 0.1.48**: panel/overlay hiện đúng ảnh mascot mới (`than-dau/`,
+    `trang-phuc/*`) và file tiếng (`tieng/`) tải được — đợt này bổ sung 49 file
+    asset từng bị `parity` báo dương tính giả là "identical".
 
 ## Bố cục `src/` dự kiến (khi đưa TypeScript gốc vào)
 

@@ -1,9 +1,10 @@
 # Zap-XuXu — Firefox for Android
 
 > ✅ **Trạng thái hiện tại** — port đầy đủ từ kiến trúc mobile của bản iOS Safari
-> (repo `zapeeAsistant_iOS`), baseline bundle Chrome **v0.1.35** (affree
-> `hytek_branch` @ `2a4f94d`). Toàn bộ khác biệt nền tảng Firefox (F1–F8), quyết
-> định kiến trúc và checklist QA trên thiết bị nằm trong **[PORTING.md](PORTING.md)**.
+> (repo `zapeeAsistant_iOS`), baseline bundle Chrome **v0.1.48** (affree
+> `hytek_branch` @ `ad0deba`, 03/09/2026). Toàn bộ khác biệt nền tảng Firefox
+> (F1–F8), quyết định kiến trúc (D1–D5) và checklist QA trên thiết bị nằm trong
+> **[PORTING.md](PORTING.md)**.
 
 Tiện ích Firefox for Android (Fenix) giúp trang web Zapee bàn giao đơn hàng
 (`zapee_order_handoff`) và hướng dẫn/hỗ trợ người mua hoàn tất đơn ngay trên

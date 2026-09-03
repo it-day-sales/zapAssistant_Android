@@ -792,6 +792,8 @@
         window.location.href = url;
         return { type: "zapee_dom_op_result", opId: msg.opId, ok: true, currentUrl: url };
       }
+      case "background_capture_values":
+        return { type: "zapee_dom_op_result", opId: msg.opId, ok: false, error: "background_only_operation", currentUrl: location.href };
       default: {
         const exhaustiveCheck = msg.kind;
         return { type: "zapee_dom_op_result", opId: msg.opId, ok: false, error: `unknown_kind:${String(exhaustiveCheck)}`, currentUrl: location.href };
@@ -3561,10 +3563,15 @@ ${guideHighlightCss({
     const n = Number(String(input.value || "1").replace(/[^\d]/g, ""));
     return Number.isFinite(n) && n >= 1 ? n : 1;
   }
+  function normalizeCoopProductQty(value) {
+    const quantity = Math.trunc(Number(value));
+    return Number.isFinite(quantity) && quantity >= 1 ? quantity : 1;
+  }
   async function setCoopProductQty(targetQty) {
-    const target = Math.max(1, Math.min(20, Math.trunc(Number(targetQty) || 1)));
+    const target = normalizeCoopProductQty(targetQty);
     const input = findQtyInput();
     if (!input) return false;
+    if (readQty(input) === target) return true;
     try {
       input.scrollIntoView?.({ block: "center", behavior: "smooth" });
     } catch {
@@ -3582,21 +3589,25 @@ ${guideHighlightCss({
     if (readQty(input) === target) return true;
     let current = readQty(findQtyInput());
     let guard = 0;
-    while (current < target && guard < 25) {
+    while (current < target && guard < 999) {
       const plus = findPlus();
       if (!plus) break;
       plus.click();
       await new Promise((r) => setTimeout(r, 280));
-      current = readQty(findQtyInput());
+      const next = readQty(findQtyInput());
       guard += 1;
+      if (next === current) break;
+      current = next;
     }
-    while (current > target && guard < 50) {
+    while (current > target && guard < 999) {
       const minus = findMinus();
       if (!minus) break;
       minus.click();
       await new Promise((r) => setTimeout(r, 280));
-      current = readQty(findQtyInput());
+      const next = readQty(findQtyInput());
       guard += 1;
+      if (next === current) break;
+      current = next;
     }
     const updatedInput = findQtyInput();
     return updatedInput !== null && readQty(updatedInput) === target;
@@ -5107,6 +5118,75 @@ ${guideHighlightCss({
     if (candidates[0]?.clean) return candidates[0].clean;
     return slugName ? slugName.charAt(0).toUpperCase() + slugName.slice(1) : "S\u1EA3n ph\u1EA9m";
   }
+  function checkoutQuantityText(value) {
+    const match = String(value || "").replace(/\s+/g, " ").trim().match(/^số lượng\s*:?\s*(\d{1,4})$/i);
+    if (!match) return null;
+    const quantity = Number(match[1]);
+    return Number.isInteger(quantity) && quantity > 0 && quantity <= 9999 ? quantity : null;
+  }
+  function checkoutQuantityMarkers(root = document) {
+    return [...root.querySelectorAll("*")].filter((element) => element instanceof HTMLElement && visible5(element)).filter((element) => checkoutQuantityText(element.textContent || "") !== null).filter((element) => ![...element.children].some(
+      (child) => checkoutQuantityText(child.textContent || "") !== null
+    ));
+  }
+  function checkoutName(scope, quantityMarker) {
+    const candidates = [];
+    const add = (raw, score) => {
+      const value = String(raw || "").replace(/\s+/g, " ").trim();
+      const normalized = comparableText(value);
+      if (value.length < 4 || value.length > 180 || !/\p{L}/u.test(value)) return;
+      if (/\d[\d.,]*\s*(?:đ|₫)/iu.test(value)) return;
+      if (/^(?:so luong|chi con|con lai|don vi tinh|gia|thanh tien|tong cong|tong don|khuyen mai|evoucher|san pham|product image)/i.test(normalized)) return;
+      candidates.push({ value, score });
+    };
+    for (const image of scope.querySelectorAll("img[alt]")) {
+      add(image.getAttribute("alt"), 100);
+    }
+    for (const element of scope.querySelectorAll(
+      "[data-content-name*='productName'],[data-content-name*='product-name'],h1,h2,h3,h4,h5,a[title],a[aria-label]"
+    )) {
+      add(element.getAttribute("title") || element.getAttribute("aria-label") || element.textContent, 85);
+    }
+    for (const element of scope.querySelectorAll("p,span,strong,div")) {
+      if (element.childElementCount > 0 || element === quantityMarker) continue;
+      const beforeQuantity = Boolean(
+        element.compareDocumentPosition(quantityMarker) & Node.DOCUMENT_POSITION_FOLLOWING
+      );
+      add(element.textContent, 30 + (beforeQuantity ? 10 : 0));
+    }
+    candidates.sort((left, right) => right.score - left.score || right.value.length - left.value.length);
+    return candidates[0]?.value || "";
+  }
+  function checkoutProductScope(marker, markers) {
+    let scope = marker.parentElement;
+    let fallback = null;
+    for (let depth = 0; scope && scope !== document.body && depth < 8; depth += 1, scope = scope.parentElement) {
+      const ownedMarkers = markers.filter((candidate) => scope?.contains(candidate));
+      if (ownedMarkers.length > 1) break;
+      if (ownedMarkers.length !== 1 || parseUnitPrice(scope.textContent || "") <= 0) continue;
+      if (!checkoutName(scope, marker)) continue;
+      fallback = scope;
+      if (scope.querySelector("img,a[href]")) return scope;
+    }
+    return fallback;
+  }
+  function checkoutLine(scope, quantityMarker, anchor) {
+    const qty = checkoutQuantityText(quantityMarker.textContent || "") ?? parseQuantity(scope) ?? 0;
+    const name = anchor ? cartName(anchor, scope) : checkoutName(scope, quantityMarker);
+    const unitPrice = parseUnitPrice(scope.textContent || "");
+    if (!name || qty <= 0 || unitPrice <= 0) return null;
+    const image = scope.querySelector("img[src]");
+    return {
+      name,
+      qty,
+      unitPrice,
+      // Co.op checkout shows the per-unit sale/original prices, not a line total.
+      lineTotal: unitPrice * qty,
+      sku: anchor ? productSku(anchor.href) : void 0,
+      image: image?.currentSrc || image?.src || "",
+      url: anchor?.href
+    };
+  }
   function readVisibleCartDom() {
     if (normalizePath(location.href) !== "/cart") return null;
     const anchors = [...document.querySelectorAll("a[href*='--s']")].filter(visible5);
@@ -5157,46 +5237,31 @@ ${guideHighlightCss({
   }
   function readCheckoutSummaryDom() {
     if (!/\/checkout/i.test(location.pathname)) return null;
-    const byLink = (() => {
-      const anchors = [...document.querySelectorAll("a[href*='--s']")].filter(visible5);
-      if (!anchors.length) return null;
-      const path = normalizePath(location.href);
-      if (path.includes("checkout")) {
-        const seen = /* @__PURE__ */ new Set();
-        const items = [];
-        for (const anchor of anchors) {
-          const sku = productSku(anchor.href);
-          const key = sku || normalizePath(anchor.href);
-          if (!key || seen.has(key)) continue;
-          const scope = findProductScope(anchor);
-          const quantity = parseQuantity(scope) || Number((scope.textContent || "").match(/[sS]ố lượng\s*(\d+)/)?.[1]) || 0;
-          if (!quantity) continue;
-          const lineTotal = parseMoney(scope.textContent || "");
-          seen.add(key);
-          items.push({
-            sku,
-            name: cartName(anchor, scope),
-            qty: quantity,
-            unitPrice: parseUnitPrice(scope.textContent || "") || (lineTotal ? Math.round(lineTotal / quantity) : 0),
-            lineTotal: lineTotal || 0,
-            image: scope.querySelector("img[src]")?.src || "",
-            url: anchor.href
-          });
-        }
-        if (!items.length) return null;
-        const itemTotal = items.reduce((s, i) => s + (i.lineTotal || 0), 0);
-        return {
-          items,
-          total: itemTotal,
-          currency: "VND",
-          source: "checkout-dom",
-          pageUrl: location.href,
-          capturedAt: (/* @__PURE__ */ new Date()).toISOString()
-        };
-      }
-      return null;
-    })();
-    return byLink;
+    const markers = checkoutQuantityMarkers();
+    if (!markers.length) return null;
+    const anchors = [...document.querySelectorAll("a[href*='--s']")].filter(visible5);
+    const seen = /* @__PURE__ */ new Set();
+    const items = [];
+    for (const marker of markers) {
+      const scope = checkoutProductScope(marker, markers);
+      if (!scope) continue;
+      const anchor = anchors.find((candidate) => scope.contains(candidate));
+      const item = checkoutLine(scope, marker, anchor);
+      if (!item) continue;
+      const key = item.sku || comparableText(item.name);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      items.push(item);
+    }
+    if (!items.length) return null;
+    return {
+      items,
+      total: items.reduce((sum, item) => sum + (item.lineTotal || 0), 0),
+      currency: "VND",
+      source: "checkout-dom",
+      pageUrl: location.href,
+      capturedAt: (/* @__PURE__ */ new Date()).toISOString()
+    };
   }
   function readCoopLiveCart() {
     return readVisibleCartDom() || readCheckoutSummaryDom();
@@ -6083,7 +6148,7 @@ ${guideHighlightCss({
     const raw = Array.isArray(payload.products) ? payload.products : Array.isArray(payload.items) ? payload.items : [];
     return raw.map((p) => ({
       url: typeof p.url === "string" ? p.url : typeof p.productUrl === "string" ? p.productUrl : void 0,
-      qty: Math.max(1, Math.min(20, Number(p.qty ?? p.quantity ?? 1) || 1)),
+      qty: normalizeCoopProductQty(p.qty ?? p.quantity ?? 1),
       name: typeof p.name === "string" ? p.name : void 0
     }));
   }

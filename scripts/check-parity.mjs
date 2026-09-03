@@ -189,6 +189,24 @@ function checkGlobalUsage() {
   ok("global-usage gates OK (no window.chrome; chrome.windows.* only in sidepanel.js)");
 }
 
+/**
+ * Mọi file (ĐỆ QUY) dưới `root`, trả đường dẫn tương đối theo root.
+ *
+ * Bản đầu chỉ quét 1 tầng và `continue` khi gặp thư mục con — đúng lúc upstream
+ * 0.1.48 thêm `mascot/than-dau/`, `mascot/tieng/` và 20 file `mascot/trang-phuc/*`
+ * thì checker vẫn báo "✓ mascot/ identical" trong khi bản Android thiếu 49 file
+ * (mascot vỡ ảnh + mất file tiếng). Dương tính giả kiểu đó tệ hơn không kiểm.
+ */
+function filesUnder(root, prefix = "") {
+  const out = [];
+  for (const entry of readdirSync(join(root, prefix))) {
+    const rel = prefix ? `${prefix}/${entry}` : entry;
+    if (statSync(join(root, rel)).isDirectory()) out.push(...filesUnder(root, rel));
+    else out.push(rel);
+  }
+  return out;
+}
+
 function checkAssets(dist) {
   for (const dir of ASSET_DIRS) {
     const theirs = join(dist, dir);
@@ -202,16 +220,25 @@ function checkAssets(dist) {
       continue;
     }
     let same = true;
-    for (const f of readdirSync(theirs)) {
-      const a = join(theirs, f);
-      const b = join(mine, f);
-      if (statSync(a).isDirectory()) continue;
-      if (!existsSync(b) || !readFileSync(a).equals(readFileSync(b))) {
-        fail(`${dir}/${f}: differs from (or missing vs) the Chrome build`);
+    const upstreamFiles = filesUnder(theirs);
+    for (const rel of upstreamFiles) {
+      const a = join(theirs, rel);
+      const b = join(mine, rel);
+      if (!existsSync(b)) {
+        fail(`${dir}/${rel}: MISSING from extension/ (có trong bản Chrome)`);
+        same = false;
+      } else if (!readFileSync(a).equals(readFileSync(b))) {
+        fail(`${dir}/${rel}: differs from the Chrome build`);
         same = false;
       }
     }
-    if (same) ok(`${dir}/ identical to the Chrome build`);
+    // File thừa bên mobile cũng là drift (asset upstream đã bỏ mà mình còn giữ).
+    for (const rel of filesUnder(mine)) {
+      if (!existsSync(join(theirs, rel))) {
+        note(`${dir}/${rel}: chỉ có ở bản Android (không có trong bản Chrome)`);
+      }
+    }
+    if (same) ok(`${dir}/ identical to the Chrome build (${upstreamFiles.length} file, đệ quy)`);
   }
 }
 
